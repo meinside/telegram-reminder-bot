@@ -1,0 +1,4 @@
+telegram-reminder-bot
+config.json
+*.db
+*.sqlite*
