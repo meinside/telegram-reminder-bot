@@ -321,6 +321,8 @@ func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database
 		}
 	} else {
 		logInfo("no usable message from update.")
+
+		msg = msgTypeNotSupported
 	}
 
 	// send message
