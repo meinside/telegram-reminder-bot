@@ -93,6 +93,12 @@ type config struct {
 	Verbose              bool     `json:"verbose,omitempty"`
 }
 
+// function arguments
+type arguments struct {
+	Message string `json:"message"`
+	When    string `json:"when"`
+}
+
 // load config at given path
 func loadConfig(fpath string) (conf config, err error) {
 	var bytes []byte
@@ -508,35 +514,27 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 						logError(db, "there were no returned function call arguments")
 					} else {
 						if functionName == funcNameReserveMessageAtAbsoluteTime {
-							arguments, _ := message.FunctionCall.ArgumentsParsed()
+							var args arguments
+							if err := message.FunctionCall.ArgumentsInto(&args); err == nil {
+								if args.Message != "" && args.When != "" {
+									if t, err := time.ParseInLocation(datetimeFormat, args.When, _location); err == nil {
+										result = append(result, parsedItem{
+											Message: args.Message,
+											When:    t,
+										})
+									} else {
+										errs = append(errs, fmt.Errorf("failed to parse time: %s for 'when' argument", err))
 
-							var msg, when string
-							if m, exists := arguments["message"]; exists {
-								msg = m.(string)
-							} else {
-								errs = append(errs, fmt.Errorf("there was no returned parameter 'message' from function call"))
-
-								logError(db, "there was no returned parameter 'message' from function call")
-							}
-							if w, exists := arguments["when"]; exists {
-								when = w.(string)
-							} else {
-								errs = append(errs, fmt.Errorf("there was no returned parameter 'when' from function call"))
-
-								logError(db, "there was no returned parameter 'when' from function call")
-							}
-
-							if msg != "" && when != "" {
-								if t, err := time.ParseInLocation(datetimeFormat, when, _location); err == nil {
-									result = append(result, parsedItem{
-										Message: msg,
-										When:    t,
-									})
+										logError(db, "failed to parse time: %s for 'when' argument", errors.Join(errs...))
+									}
 								} else {
-									errs = append(errs, fmt.Errorf("failed to parse time: %s for 'when' argument", err))
-
-									logError(db, "failed to parse time: %s for 'when' argument", errors.Join(errs...))
+									logError(db, "values in arguments were not valid: %+v", map[string]string{
+										"message": args.Message,
+										"when":    args.When,
+									})
 								}
+							} else {
+								logError(db, "failed to parse arguments: %s", err)
 							}
 						}
 
