@@ -6,5 +6,6 @@
     "openai_api_key": "yyyyyyyyyyyyyy",
     "openai_org_id": "zzzzzzzzzzzzzz",
     "allowed_telegram_users": ["user1", "user2"],
+    "default_hour": 8,
     "db_filepath": "/home/ubuntu/data/reminders.db"
 }

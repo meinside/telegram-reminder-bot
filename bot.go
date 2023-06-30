@@ -90,6 +90,7 @@ type config struct {
 
 	// other configurations
 	AllowedTelegramUsers []string `json:"allowed_telegram_users"`
+	DefaultHour          int      `json:"default_hour,omitempty"`
 	Verbose              bool     `json:"verbose,omitempty"`
 }
 
@@ -116,6 +117,11 @@ func loadConfig(fpath string) (conf config, err error) {
 			}
 			if conf.OpenAIModel == "" {
 				conf.OpenAIModel = defaultChatCompletionModel
+			}
+			if conf.DefaultHour < 0 {
+				conf.DefaultHour = 0
+			} else if conf.DefaultHour >= 24 {
+				conf.DefaultHour = 23
 			}
 
 			return conf, nil
@@ -191,15 +197,19 @@ func runBot(conf config) {
 
 		// poll updates
 		bot.StartPollingUpdates(0, intervalSeconds, func(b *tg.Bot, update tg.Update, err error) {
-			if !isAllowed(conf, update) {
-				logDebug(conf, "not allowed: %s", userNameFromUpdate(update))
-				return
-			}
+			if err == nil {
+				if !isAllowed(conf, update) {
+					logDebug(conf, "not allowed: %s", userNameFromUpdate(update))
+					return
+				}
 
-			// type not supported
-			message := messageFromUpdate(update)
-			if message != nil {
-				send(b, conf, db, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
+				// type not supported
+				message := messageFromUpdate(update)
+				if message != nil {
+					send(b, conf, db, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
+				}
+			} else {
+				logError(db, "failed to fetch updates: %s", err)
 			}
 		})
 	} else {
@@ -287,7 +297,7 @@ func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database
 		if message.HasText() {
 			txt := *message.Text
 			if parsed, errs := parse(client, conf, db, *message, txt); len(errs) == 0 {
-				parsed = filterParsed(parsed)
+				parsed = filterParsed(conf, parsed)
 
 				if len(parsed) == 1 {
 					what := parsed[0].Message
@@ -306,12 +316,8 @@ func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database
 						msg = msgSelectWhat
 
 						// options for inline keyboards
-						whens := []time.Time{}
-						for _, p := range parsed {
-							whens = append(whens, p.When)
-						}
 						options.SetReplyMarkup(tg.InlineKeyboardMarkup{
-							InlineKeyboard: datetimeButtonsForCallbackQuery(whens, chatID, message.MessageID),
+							InlineKeyboard: datetimeButtonsForCallbackQuery(parsed, chatID, message.MessageID),
 						})
 					} else {
 						msg = msgError
@@ -458,8 +464,9 @@ func send(bot *tg.Bot, conf config, db *Database, message string, chatID int64, 
 
 // type for parsed items
 type parsedItem struct {
-	Message string
-	When    time.Time
+	Message   string
+	When      time.Time
+	Generated bool
 }
 
 // parse given string and return the function call
@@ -519,8 +526,9 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 								if args.Message != "" && args.When != "" {
 									if t, err := time.ParseInLocation(datetimeFormat, args.When, _location); err == nil {
 										result = append(result, parsedItem{
-											Message: args.Message,
-											When:    t,
+											Message:   args.Message,
+											When:      t,
+											Generated: false,
 										})
 									} else {
 										errs = append(errs, fmt.Errorf("failed to parse time: %s for 'when' argument", err))
@@ -554,27 +562,52 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 }
 
 // filter parsed items to be all valid
-func filterParsed(parsed []parsedItem) (filtered []parsedItem) {
-	filtered = []parsedItem{}
-
-	// remove already-passed times
-	now := time.Now()
+func filterParsed(conf config, parsed []parsedItem) (filtered []parsedItem) {
+	// add some generated items for convenience
+	generated := []parsedItem{}
 	for _, p := range parsed {
-		if p.When.In(_location).Before(now) {
+		// save it as it is,
+		generated = append(generated, p)
+
+		// and add generated ones,
+		when := p.When.In(_location)
+		hour, minute := when.Hour(), when.Minute()
+		if hour == 0 && minute == 0 {
+			// default hour
+			generated = append(generated, parsedItem{
+				Message:   p.Message,
+				When:      p.When.In(_location).Add(time.Hour * time.Duration(conf.DefaultHour)),
+				Generated: true,
+			})
+		} else if hour < 12 {
 			// add 12 hours if it is AM
-			hour := p.When.In(_location).Hour()
-			if hour < 12 {
-				filtered = append(filtered, parsedItem{
-					Message: p.Message,
-					When:    p.When.In(_location).Add(time.Hour * 12),
-				})
-			}
-
-			// skip already-passed ones
-			continue
+			generated = append(generated, parsedItem{
+				Message:   p.Message,
+				When:      p.When.In(_location).Add(time.Hour * 12),
+				Generated: true,
+			})
 		}
+	}
 
-		filtered = append(filtered, p)
+	// remove already-passed or duplicated ones
+	filtered = []parsedItem{}
+	duplicated := map[string]bool{}
+	now := time.Now()
+	for _, p := range generated {
+		when := p.When.In(_location)
+
+		// remove duplicated ones,
+		dup := when.Format(datetimeFormat)
+		if _, exists := duplicated[dup]; exists {
+			continue
+		} else {
+			duplicated[dup] = true // mark as duplicated,
+
+			// and remove already-passed ones
+			if when.After(now) {
+				filtered = append(filtered, p)
+			}
+		}
 	}
 
 	return filtered
@@ -898,11 +931,19 @@ func defaultReplyMarkup() tg.ReplyKeyboardMarkup {
 }
 
 // generate inline keyboard buttons for multiple datetimes
-func datetimeButtonsForCallbackQuery(times []time.Time, chatID int64, messageID int64) [][]tg.InlineKeyboardButton {
+func datetimeButtonsForCallbackQuery(items []parsedItem, chatID int64, messageID int64) [][]tg.InlineKeyboardButton {
 	// datetime buttons
 	keys := make(map[string]string)
-	for _, w := range times {
-		keys[datetimeToStr(w)] = fmt.Sprintf("%s %d/%d/%s", cmdLoad, chatID, messageID, datetimeToStr(w))
+
+	var title, generated string
+	for _, item := range items {
+		if item.Generated {
+			generated = " *"
+		} else {
+			generated = ""
+		}
+		title = fmt.Sprintf("%s%s", datetimeToStr(item.When), generated)
+		keys[title] = fmt.Sprintf("%s %d/%d/%s", cmdLoad, chatID, messageID, datetimeToStr(item.When))
 	}
 	buttons := tg.NewInlineKeyboardButtonsAsRowsWithCallbackData(keys)
 
