@@ -38,6 +38,7 @@ and set your values:
     "openai_model": "gpt-3.5-turbo",
     "allowed_telegram_users": ["user1", "user2"],
     "db_filepath": "/path/to/reminder-db.sqlite",
+    "default_hour": 8,
     "verbose": false
 }
 ```
