@@ -312,7 +312,7 @@ func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database
 						msg = fmt.Sprintf(msgSaveFailedFormat, what, err)
 					}
 				} else if len(parsed) > 0 {
-					if _, err := db.SaveTemporaryMessage(chatID, message.MessageID, txt); err == nil {
+					if _, err := db.SaveTemporaryMessage(chatID, message.MessageID, parsed[0].Message); err == nil {
 						msg = msgSelectWhat
 
 						// options for inline keyboards
