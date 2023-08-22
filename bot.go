@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/meinside/geektoken"
+	"github.com/meinside/infisical-go"
+	"github.com/meinside/infisical-go/helper"
 	"github.com/meinside/openai-go"
 	tg "github.com/meinside/telegram-bot-go"
 	"github.com/meinside/version-go"
@@ -73,25 +75,37 @@ var _location *time.Location
 
 // config struct for loading a configuration file
 type config struct {
-	// telegram bot api
-	TelegramBotToken string `json:"telegram_bot_token"`
+	OpenAIModel             string `json:"openai_model,omitempty"`
+	MonitorIntervalSeconds  int    `json:"monitor_interval_seconds"`
+	TelegramIntervalSeconds int    `json:"telegram_interval_seconds"`
+	MaxNumTries             int    `json:"max_num_tries"`
+	DBFilepath              string `json:"db_filepath"`
 
-	MonitorIntervalSeconds  int `json:"monitor_interval_seconds"`
-	TelegramIntervalSeconds int `json:"telegram_interval_seconds"`
-	MaxNumTries             int `json:"max_num_tries"`
-
-	// openai api
-	OpenAIAPIKey         string `json:"openai_api_key"`
-	OpenAIOrganizationID string `json:"openai_org_id"`
-	OpenAIModel          string `json:"openai_model,omitempty"`
-
-	// database logging
-	DBFilepath string `json:"db_filepath"`
-
-	// other configurations
+	// other optional configurations
 	AllowedTelegramUsers []string `json:"allowed_telegram_users"`
 	DefaultHour          int      `json:"default_hour,omitempty"`
 	Verbose              bool     `json:"verbose,omitempty"`
+
+	// token and api key
+	TelegramBotToken     string `json:"telegram_bot_token"`
+	OpenAIAPIKey         string `json:"openai_api_key"`
+	OpenAIOrganizationID string `json:"openai_org_id"`
+
+	// or Infisical settings
+	Infisical *struct {
+		// NOTE: When the workspace's E2EE setting is enabled, APIKey is essential for decryption
+		E2EE   bool    `json:"e2ee,omitempty"`
+		APIKey *string `json:"api_key,omitempty"`
+
+		WorkspaceID string               `json:"workspace_id"`
+		Token       string               `json:"token"`
+		Environment string               `json:"environment"`
+		SecretType  infisical.SecretType `json:"secret_type"`
+
+		TelegramBotTokenKeyPath     string `json:"telegram_bot_token_key_path"`
+		OpenAIAPIKeyKeyPath         string `json:"openai_api_key_key_path"`
+		OpenAIOrganizationIDKeyPath string `json:"openai_org_id_key_path"`
+	} `json:"infisical,omitempty"`
 }
 
 // function arguments
@@ -105,7 +119,51 @@ func loadConfig(fpath string) (conf config, err error) {
 	var bytes []byte
 	if bytes, err = os.ReadFile(fpath); err == nil {
 		if err = json.Unmarshal(bytes, &conf); err == nil {
-			// check config values
+			if (conf.TelegramBotToken == "" || conf.OpenAIAPIKey == "" || conf.OpenAIOrganizationID == "") && conf.Infisical != nil {
+				// read token and api key from infisical
+				var botToken, apiKey, orgID string
+
+				var kvs map[string]string
+				if conf.Infisical.E2EE && conf.Infisical.APIKey != nil {
+					kvs, err = helper.E2EEValues(
+						*conf.Infisical.APIKey,
+						conf.Infisical.WorkspaceID,
+						conf.Infisical.Token,
+						conf.Infisical.Environment,
+						conf.Infisical.SecretType,
+						[]string{
+							conf.Infisical.TelegramBotTokenKeyPath,
+							conf.Infisical.OpenAIAPIKeyKeyPath,
+							conf.Infisical.OpenAIOrganizationIDKeyPath,
+						},
+					)
+				} else {
+					kvs, err = helper.Values(
+						conf.Infisical.WorkspaceID,
+						conf.Infisical.Token,
+						conf.Infisical.Environment,
+						conf.Infisical.SecretType,
+						[]string{
+							conf.Infisical.TelegramBotTokenKeyPath,
+							conf.Infisical.OpenAIAPIKeyKeyPath,
+							conf.Infisical.OpenAIOrganizationIDKeyPath,
+						},
+					)
+				}
+
+				var exists bool
+				if botToken, exists = kvs[conf.Infisical.TelegramBotTokenKeyPath]; exists {
+					conf.TelegramBotToken = botToken
+				}
+				if apiKey, exists = kvs[conf.Infisical.OpenAIAPIKeyKeyPath]; exists {
+					conf.OpenAIAPIKey = apiKey
+				}
+				if orgID, exists = kvs[conf.Infisical.OpenAIOrganizationIDKeyPath]; exists {
+					conf.OpenAIOrganizationID = orgID
+				}
+			}
+
+			// set default/fallback values
 			if conf.MonitorIntervalSeconds <= 0 {
 				conf.MonitorIntervalSeconds = defaultMonitorIntervalSeconds
 			}
@@ -123,12 +181,10 @@ func loadConfig(fpath string) (conf config, err error) {
 			} else if conf.DefaultHour >= 24 {
 				conf.DefaultHour = 23
 			}
-
-			return conf, nil
 		}
 	}
 
-	return config{}, err
+	return conf, err
 }
 
 // launch bot with given parameters
