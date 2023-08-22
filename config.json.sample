@@ -1,11 +1,12 @@
 {
-    "telegram_bot_token": "xxxxxxxxxxxxxx",
     "telegram_interval_seconds": 5,
     "monitor_interval_seconds": 60,
     "max_num_tries": 5,
-    "openai_api_key": "yyyyyyyyyyyyyy",
-    "openai_org_id": "zzzzzzzzzzzzzz",
     "allowed_telegram_users": ["user1", "user2"],
     "default_hour": 8,
-    "db_filepath": "/home/ubuntu/data/reminders.db"
+    "db_filepath": "/home/ubuntu/data/reminders.db",
+
+    "telegram_bot_token": "xxxxxxxxxxxxxx",
+    "openai_api_key": "yyyyyyyyyyyyyy",
+    "openai_org_id": "zzzzzzzzzzzzzz"
 }
