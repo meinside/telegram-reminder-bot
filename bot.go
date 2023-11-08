@@ -541,8 +541,8 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 		},
 		openai.ChatCompletionOptions{}.
 			SetUser(userAgent(userID)).
-			SetFunctions([]openai.ChatCompletionFunction{
-				openai.NewChatCompletionFunction(
+			SetTools([]openai.ChatCompletionTool{
+				openai.NewChatCompletionTool(
 					funcNameReserveMessageAtAbsoluteTime,
 					"Reserve given message and send it back at given absolute time.",
 					openai.NewChatCompletionFunctionParameters().
@@ -551,7 +551,7 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 						SetRequiredParameters([]string{"message", "when"}), // yyyy.mm.dd hh:MM
 				),
 			}).
-			SetFunctionCall(openai.ChatCompletionFunctionCallAuto)); err != nil {
+			SetToolChoice(openai.ChatCompletionToolChoiceAuto)); err != nil {
 		errs = append(errs, fmt.Errorf("failed to create chat completion: %s", err))
 
 		// log failure
@@ -565,49 +565,37 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 			for _, choice := range created.Choices {
 				message := choice.Message
 
-				if message.FunctionCall == nil {
-					logError(db, "there was no returned function call")
-				} else {
-					functionName := message.FunctionCall.Name
-					if functionName == "" {
-						logError(db, "there was no returned function call name")
-					}
+				if len(message.ToolCalls) > 0 {
+					toolCall := message.ToolCalls[0]
+					function := toolCall.Function
 
-					if message.FunctionCall.Arguments == nil {
-						logError(db, "there were no returned function call arguments")
-					} else {
-						if functionName == funcNameReserveMessageAtAbsoluteTime {
-							var args arguments
-							if err := message.FunctionCall.ArgumentsInto(&args); err == nil {
-								if args.Message != "" && args.When != "" {
-									if t, err := time.ParseInLocation(datetimeFormat, args.When, _location); err == nil {
-										result = append(result, parsedItem{
-											Message:   args.Message,
-											When:      t,
-											Generated: false,
-										})
-									} else {
-										errs = append(errs, fmt.Errorf("failed to parse time: %s for 'when' argument", err))
-
-										logError(db, "failed to parse time: %s for 'when' argument", errors.Join(errs...))
-									}
-								} else {
-									logError(db, "values in arguments were not valid: %+v", map[string]string{
-										"message": args.Message,
-										"when":    args.When,
+					if function.Name == funcNameReserveMessageAtAbsoluteTime {
+						var args arguments
+						if err := toolCall.ArgumentsInto(&args); err == nil {
+							if args.Message != "" && args.When != "" {
+								if t, err := time.ParseInLocation(datetimeFormat, args.When, _location); err == nil {
+									result = append(result, parsedItem{
+										Message:   args.Message,
+										When:      t,
+										Generated: false,
 									})
+								} else {
+									errs = append(errs, fmt.Errorf("failed to parse time: %s for 'when' argument", err))
+
+									logError(db, "failed to parse time: %s for 'when' argument", errors.Join(errs...))
 								}
 							} else {
-								logError(db, "failed to parse arguments: %s", err)
+								logError(db, "values in arguments were not valid: %+v", map[string]string{
+									"message": args.Message,
+									"when":    args.When,
+								})
 							}
+						} else {
+							logError(db, "failed to parse function arguments: %s", err)
 						}
 
 						// log success
-						functionArgs := ""
-						if message.FunctionCall.Arguments != nil {
-							functionArgs = *message.FunctionCall.Arguments
-						}
-						savePromptAndResult(db, chatID, userID, username, text, created.Usage.PromptTokens, functionName, functionArgs, created.Usage.CompletionTokens, true)
+						savePromptAndResult(db, chatID, userID, username, text, created.Usage.PromptTokens, function.Name, function.Arguments, created.Usage.CompletionTokens, true)
 					}
 				}
 			}
