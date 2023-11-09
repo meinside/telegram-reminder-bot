@@ -545,7 +545,7 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 				openai.NewChatCompletionTool(
 					funcNameReserveMessageAtAbsoluteTime,
 					"Reserve given message and send it back at given absolute time.",
-					openai.NewChatCompletionFunctionParameters().
+					openai.NewToolFunctionParameters().
 						AddPropertyWithDescription("message", "string", "The message to reserve.").
 						AddPropertyWithDescription("when", "string", "The time when the reserved message should be sent back, in format: 'yyyy.mm.dd hh:MM'.").
 						SetRequiredParameters([]string{"message", "when"}), // yyyy.mm.dd hh:MM
