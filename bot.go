@@ -315,7 +315,7 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 					message,
 					tg.OptionsSendMessage{}.
 						SetReplyMarkup(defaultReplyMarkup()).
-						SetReplyToMessageID(q.MessageID))
+						SetReplyParameters(tg.ReplyParameters{MessageID: q.MessageID}))
 
 				if sent.Ok {
 					// mark as delivered
@@ -511,7 +511,7 @@ func send(bot *tg.Bot, conf config, db *Database, message string, chatID int64, 
 		SetReplyMarkup(defaultReplyMarkup()).
 		SetParseMode(tg.ParseModeHTML)
 	if messageID != nil {
-		options.SetReplyToMessageID(*messageID)
+		options.SetReplyParameters(tg.ReplyParameters{MessageID: *messageID})
 	}
 	if res := bot.SendMessage(chatID, message, options); !res.Ok {
 		logError(db, "failed to send message: %s", *res.Description)
