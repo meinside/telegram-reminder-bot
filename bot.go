@@ -3,6 +3,7 @@ package main
 // bot.go
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,11 +16,12 @@ import (
 	"github.com/meinside/geektoken"
 	"github.com/meinside/infisical-go"
 	"github.com/meinside/infisical-go/helper"
-	"github.com/meinside/openai-go"
 	tg "github.com/meinside/telegram-bot-go"
 	"github.com/meinside/version-go"
 
+	"github.com/google/generative-ai-go/genai"
 	"github.com/tailscale/hujson"
+	"google.golang.org/api/option"
 )
 
 const (
@@ -64,20 +66,19 @@ const (
 
 	datetimeFormat = "2006.01.02 15:04" // yyyy.mm.dd hh:MM
 
-	funcNameReserveMessageAtAbsoluteTime = "reserve_message_absolute"
-
 	// default configs
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	defaultChatCompletionModel     = "gpt-3.5-turbo"
+	defaultGenerativeModel         = "gemini-pro"
 )
 
 var _location *time.Location
 
 // config struct for loading a configuration file
 type config struct {
-	OpenAIModel             string `json:"openai_model,omitempty"`
+	GoogleGenerativeModel string `json:"google_generative_model,omitempty"`
+
 	MonitorIntervalSeconds  int    `json:"monitor_interval_seconds"`
 	TelegramIntervalSeconds int    `json:"telegram_interval_seconds"`
 	MaxNumTries             int    `json:"max_num_tries"`
@@ -89,9 +90,8 @@ type config struct {
 	Verbose              bool     `json:"verbose,omitempty"`
 
 	// token and api key
-	TelegramBotToken     string `json:"telegram_bot_token"`
-	OpenAIAPIKey         string `json:"openai_api_key"`
-	OpenAIOrganizationID string `json:"openai_org_id"`
+	TelegramBotToken string `json:"telegram_bot_token"`
+	GoogleAIAPIKey   string `json:"google_ai_api_key"`
 
 	// or Infisical settings
 	Infisical *struct {
@@ -102,16 +102,9 @@ type config struct {
 		Environment string               `json:"environment"`
 		SecretType  infisical.SecretType `json:"secret_type"`
 
-		TelegramBotTokenKeyPath     string `json:"telegram_bot_token_key_path"`
-		OpenAIAPIKeyKeyPath         string `json:"openai_api_key_key_path"`
-		OpenAIOrganizationIDKeyPath string `json:"openai_org_id_key_path"`
+		TelegramBotTokenKeyPath string `json:"telegram_bot_token_key_path"`
+		GoogleAIAPIKeyKeyPath   string `json:"google_ai_api_key_key_path"`
 	} `json:"infisical,omitempty"`
-}
-
-// function arguments
-type arguments struct {
-	Message string `json:"message"`
-	When    string `json:"when"`
 }
 
 // load config at given path
@@ -120,9 +113,9 @@ func loadConfig(fpath string) (conf config, err error) {
 	if bytes, err = os.ReadFile(fpath); err == nil {
 		if bytes, err = standardizeJSON(bytes); err == nil {
 			if err = json.Unmarshal(bytes, &conf); err == nil {
-				if (conf.TelegramBotToken == "" || conf.OpenAIAPIKey == "" || conf.OpenAIOrganizationID == "") && conf.Infisical != nil {
+				if (conf.TelegramBotToken == "" || conf.GoogleAIAPIKey == "") && conf.Infisical != nil {
 					// read token and api key from infisical
-					var botToken, apiKey, orgID string
+					var botToken, apiKey string
 
 					var kvs map[string]string
 					kvs, err = helper.Values(
@@ -133,8 +126,7 @@ func loadConfig(fpath string) (conf config, err error) {
 						conf.Infisical.SecretType,
 						[]string{
 							conf.Infisical.TelegramBotTokenKeyPath,
-							conf.Infisical.OpenAIAPIKeyKeyPath,
-							conf.Infisical.OpenAIOrganizationIDKeyPath,
+							conf.Infisical.GoogleAIAPIKeyKeyPath,
 						},
 					)
 
@@ -142,11 +134,8 @@ func loadConfig(fpath string) (conf config, err error) {
 					if botToken, exists = kvs[conf.Infisical.TelegramBotTokenKeyPath]; exists {
 						conf.TelegramBotToken = botToken
 					}
-					if apiKey, exists = kvs[conf.Infisical.OpenAIAPIKeyKeyPath]; exists {
-						conf.OpenAIAPIKey = apiKey
-					}
-					if orgID, exists = kvs[conf.Infisical.OpenAIOrganizationIDKeyPath]; exists {
-						conf.OpenAIOrganizationID = orgID
+					if apiKey, exists = kvs[conf.Infisical.GoogleAIAPIKeyKeyPath]; exists {
+						conf.GoogleAIAPIKey = apiKey
 					}
 				}
 
@@ -160,8 +149,8 @@ func loadConfig(fpath string) (conf config, err error) {
 				if conf.MaxNumTries <= 0 {
 					conf.MaxNumTries = defaultMaxNumTries
 				}
-				if conf.OpenAIModel == "" {
-					conf.OpenAIModel = defaultChatCompletionModel
+				if conf.GoogleGenerativeModel == "" {
+					conf.GoogleGenerativeModel = defaultGenerativeModel
 				}
 				if conf.DefaultHour < 0 {
 					conf.DefaultHour = 0
@@ -186,6 +175,19 @@ func standardizeJSON(b []byte) ([]byte, error) {
 	return ast.Pack(), nil
 }
 
+// remove markdown from text
+func removeMarkdown(md string) (result string) {
+	lines := []string{}
+
+	for _, line := range strings.Split(md, "\n") {
+		if !strings.HasPrefix(line, "```") {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 // launch bot with given parameters
 func runBot(conf config) {
 	var err error
@@ -193,14 +195,16 @@ func runBot(conf config) {
 	_location, _ = time.LoadLocation("Local")
 
 	token := conf.TelegramBotToken
-	apiKey := conf.OpenAIAPIKey
-	orgID := conf.OpenAIOrganizationID
+	apiKey := conf.GoogleAIAPIKey
 
 	bot := tg.NewClient(token)
-	client := openai.NewClient(apiKey, orgID)
 
-	// set verbosity
-	client.Verbose = conf.Verbose
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		logErrorAndDie(nil, "failed to create API client: %s", err)
+	}
+	defer client.Close()
 
 	// open database
 	var db *Database
@@ -228,7 +232,7 @@ func runBot(conf config) {
 				return
 			}
 
-			handleMessage(b, client, conf, db, update, message)
+			handleMessage(ctx, b, client, conf, db, update, message)
 		})
 
 		// set callback query handler
@@ -337,7 +341,7 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 }
 
 // handle allowed message update from telegram bot api
-func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database, update tg.Update, message tg.Message) {
+func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, update tg.Update, message tg.Message) {
 	var msg string
 
 	chatID := message.Chat.ID
@@ -351,7 +355,7 @@ func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database
 	if message := messageFromUpdate(update); message != nil {
 		if message.HasText() {
 			txt := *message.Text
-			if parsed, errs := parse(client, conf, db, *message, txt); len(errs) == 0 {
+			if parsed, errs := parse(ctx, client, conf, db, *message, txt); len(errs) == 0 {
 				parsed = filterParsed(conf, parsed)
 
 				if len(parsed) == 1 {
@@ -404,7 +408,7 @@ func handleMessage(bot *tg.Bot, client *openai.Client, conf config, db *Database
 }
 
 // handle allowed callback query from telegram bot api
-func handleCallbackQuery(b *tg.Bot, client *openai.Client, conf config, db *Database, update tg.Update, query tg.CallbackQuery) {
+func handleCallbackQuery(b *tg.Bot, client *genai.Client, conf config, db *Database, update tg.Update, query tg.CallbackQuery) {
 	data := *query.Data
 
 	msg := msgError
@@ -524,8 +528,14 @@ type parsedItem struct {
 	Generated bool
 }
 
+// response JSON type
+type responseJSON struct {
+	Text     string  `json:"text"`
+	Datetime *string `json:"datetime,omitempty"`
+}
+
 // parse given string and return the function call
-func parse(client *openai.Client, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
+func parse(ctx context.Context, client *genai.Client, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
 	result = []parsedItem{}
 	errs = []error{}
 
@@ -533,69 +543,87 @@ func parse(client *openai.Client, conf config, db *Database, message tg.Message,
 	userID := message.From.ID
 	username := userName(message.From)
 
-	if created, err := client.CreateChatCompletion(conf.OpenAIModel,
-		[]openai.ChatMessage{
-			openai.NewChatAssistantMessage(fmt.Sprintf("Current time is %s.", datetimeToStr(time.Now()))),
-			openai.NewChatUserMessage(text),
-		},
-		openai.ChatCompletionOptions{}.
-			SetUser(userAgent(userID)).
-			SetTools([]openai.ChatCompletionTool{
-				openai.NewChatCompletionTool(
-					funcNameReserveMessageAtAbsoluteTime,
-					"Reserve given message and send it back at given absolute time.",
-					openai.NewToolFunctionParameters().
-						AddPropertyWithDescription("message", "string", "The message to reserve.").
-						AddPropertyWithDescription("when", "string", "The time when the reserved message should be sent back, in format: 'yyyy.mm.dd hh:MM'.").
-						SetRequiredParameters([]string{"message", "when"}), // yyyy.mm.dd hh:MM
-				),
-			}).
-			SetToolChoice(openai.ChatCompletionToolChoiceAuto)); err != nil {
-		errs = append(errs, fmt.Errorf("failed to create chat completion: %s", err))
+	model := client.GenerativeModel(conf.GoogleGenerativeModel)
+	if generated, err := model.GenerateContent(
+		ctx,
+		genai.Text(fmt.Sprintf(
+			`Current time is %s. Return a JSON string with keys 'text' and 'datetime', where 'datetime' is in "yyyy.mm.dd hh:MM" format, and each value is extracted from the following text: %s.`,
+			datetimeToStr(time.Now()),
+			text,
+		)),
+	); err != nil {
+		errs = append(errs, fmt.Errorf("failed to generate text: %s", err))
 
 		// log failure
-		savePromptAndResult(db, chatID, userID, username, text, created.Usage.PromptTokens, "", "", created.Usage.CompletionTokens, false)
+		var numTokens int32
+		if counted, err := model.CountTokens(ctx, genai.Text(text)); err == nil {
+			numTokens = counted.TotalTokens
+		}
+		savePromptAndResult(db, chatID, userID, username, text, int(numTokens), 0, false)
 
-		logError(db, "failed to create chat completion: %s", err)
+		logError(db, "failed to generate text: %s", err)
 	} else {
-		if len(created.Choices) <= 0 {
-			logError(db, "there was no returned choice")
+		if len(generated.Candidates) <= 0 {
+			logError(db, "there was no returned candidate")
 		} else {
-			for _, choice := range created.Choices {
-				message := choice.Message
+			for _, candidate := range generated.Candidates {
+				content := candidate.Content
 
-				if len(message.ToolCalls) > 0 {
-					toolCall := message.ToolCalls[0]
-					function := toolCall.Function
+				if len(content.Parts) > 0 {
+					part := content.Parts[0]
+					if generatedText, ok := part.(genai.Text); ok {
+						logDebug(conf, "Generated text: %s", generatedText)
 
-					if function.Name == funcNameReserveMessageAtAbsoluteTime {
-						var args arguments
-						if err := toolCall.ArgumentsInto(&args); err == nil {
-							if args.Message != "" && args.When != "" {
-								if t, err := time.ParseInLocation(datetimeFormat, args.When, _location); err == nil {
-									result = append(result, parsedItem{
-										Message:   args.Message,
-										When:      t,
-										Generated: false,
-									})
+						bytes := []byte(removeMarkdown(string(generatedText)))
+						if bytes, err := standardizeJSON(bytes); err == nil {
+							var res responseJSON
+							if err := json.Unmarshal(bytes, &res); err == nil {
+								if res.Datetime != nil {
+									if t, err := time.ParseInLocation(datetimeFormat, *res.Datetime, _location); err == nil {
+										result = append(result, parsedItem{
+											Message:   res.Text,
+											When:      t,
+											Generated: false,
+										})
+									} else {
+										errs = append(errs, fmt.Errorf("failed to parse 'datetime': %s", err))
+
+										logError(db, "failed to parse 'datetime': %s", err)
+									}
 								} else {
-									errs = append(errs, fmt.Errorf("failed to parse time: %s for 'when' argument", err))
+									errs = append(errs, fmt.Errorf("datetime was returned empty"))
 
-									logError(db, "failed to parse time: %s for 'when' argument", errors.Join(errs...))
+									logError(db, "failed to parse 'datetime', was returned empty")
 								}
 							} else {
-								logError(db, "values in arguments were not valid: %+v", map[string]string{
-									"message": args.Message,
-									"when":    args.When,
-								})
+								errs = append(errs, fmt.Errorf("failed to parse JSON: %s", err))
+
+								logError(db, "failed to parse returned JSON string: %s", err)
 							}
 						} else {
-							logError(db, "failed to parse function arguments: %s", err)
+							errs = append(errs, fmt.Errorf("failed to standardize JSON: %s", err))
+
+							logError(db, "failed to standardize generated JSON: %s", err)
 						}
 
 						// log success
-						savePromptAndResult(db, chatID, userID, username, text, created.Usage.PromptTokens, function.Name, function.Arguments, created.Usage.CompletionTokens, true)
+						var numPromptTokens, numGeneratedTokens int32
+						if counted, err := model.CountTokens(ctx, genai.Text(text)); err == nil {
+							numPromptTokens = counted.TotalTokens
+						}
+						if counted, err := model.CountTokens(ctx, generatedText); err == nil {
+							numGeneratedTokens = counted.TotalTokens
+						}
+						savePromptAndResult(db, chatID, userID, username, text, int(numPromptTokens), int(numGeneratedTokens), true)
+					} else {
+						errs = append(errs, fmt.Errorf("no text in the part"))
+
+						logError(db, "there was no text in the returned part: %+v", part)
 					}
+				} else {
+					errs = append(errs, fmt.Errorf("no part in content"))
+
+					logError(db, "there was no part in the returned content")
 				}
 			}
 		}
@@ -656,11 +684,6 @@ func filterParsed(conf config, parsed []parsedItem) (filtered []parsedItem) {
 	return filtered
 }
 
-// generate a user-agent value
-func userAgent(userID int64) string {
-	return fmt.Sprintf("telegram-reminder-bot:%d", userID)
-}
-
 // generate user's name
 func userName(user *tg.User) string {
 	if user.Username != nil {
@@ -712,7 +735,7 @@ func countTokens(text string) (result int, err error) {
 }
 
 // save prompt and its result to logs database
-func savePromptAndResult(db *Database, chatID, userID int64, username string, prompt string, promptTokens int, functionName, functionArgs string, resultTokens int, resultSuccessful bool) {
+func savePromptAndResult(db *Database, chatID, userID int64, username string, prompt string, promptTokens int, resultTokens int, resultSuccessful bool) {
 	if db != nil {
 		if err := db.SavePrompt(Prompt{
 			ChatID:   chatID,
@@ -721,10 +744,8 @@ func savePromptAndResult(db *Database, chatID, userID int64, username string, pr
 			Text:     prompt,
 			Tokens:   promptTokens,
 			Result: ParsedItem{
-				Successful:   resultSuccessful,
-				FunctionName: functionName,
-				FunctionArgs: functionArgs,
-				Tokens:       resultTokens,
+				Successful: resultSuccessful,
+				Tokens:     resultTokens,
 			},
 		}); err != nil {
 			log.Printf("failed to save prompt & result to database: %s", err)
