@@ -41,10 +41,8 @@ type Log struct {
 type ParsedItem struct {
 	gorm.Model
 
-	Successful   bool `gorm:"index"`
-	FunctionName string
-	FunctionArgs string
-	Tokens       int `gorm:"index"`
+	Successful bool `gorm:"index"`
+	Tokens     int  `gorm:"index"`
 
 	PromptID int64 // foreign key
 }

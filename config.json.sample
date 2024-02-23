@@ -7,6 +7,5 @@
     "db_filepath": "/home/ubuntu/data/reminders.db",
 
     "telegram_bot_token": "xxxxxxxxxxxxxx",
-    "openai_api_key": "yyyyyyyyyyyyyy",
-    "openai_org_id": "zzzzzzzzzzzzzz"
+    "google_ai_api_key": "yyyyyyyyyyyyyyyyyyyy"
 }

@@ -1,6 +1,6 @@
 # Telegram Reminder Bot
 
-A telegram reminder bot which reserves messages for certain times, using ChatGPT API.
+A telegram reminder bot which reserves messages for certain times, using Google Gemini API.
 
 Reserve messages with natural language like:
 
@@ -16,7 +16,7 @@ Reserve messages with natural language like:
 
 ## Prerequisites
 
-* A [paid OpenAI account](https://openai.com/pricing), and
+* A [Google API key](https://aistudio.google.com/app/apikey), and
 * a machine which can build and run golang applications.
 
 ## Configurations
@@ -32,15 +32,15 @@ and set your values:
 
 ```json
 {
+  "google_generative_model": "gemini-pro",
+
   "allowed_telegram_users": ["user1", "user2"],
-  "openai_model": "gpt-3.5-turbo",
   "db_filepath": "/path/to/reminder-db.sqlite",
   "default_hour": 8,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
-  "openai_api_key": "key-ABCDEFGHIJK1234567890",
-  "openai_org_id": "org-1234567890abcdefghijk"
+  "google_ai_api_key": "abcdefg-987654321"
 }
 ```
 
@@ -50,8 +50,9 @@ You can use [Infisical](https://infisical.com/) for retrieving your bot token an
 
 ```json
 {
+  "google_generative_model": "gemini-pro",
+
   "allowed_telegram_users": ["user1", "user2"],
-  "openai_model": "gpt-3.5-turbo",
   "db_filepath": null,
   "default_hour": 8,
   "verbose": false,
@@ -65,8 +66,7 @@ You can use [Infisical](https://infisical.com/) for retrieving your bot token an
     "secret_type": "shared",
 
     "telegram_bot_token_key_path": "/path/to/your/KEY_TO_REMINDER_BOT_TOKEN",
-    "openai_api_key_key_path": "/path/to/your/KEY_TO_OPENAI_API_KEY",
-    "openai_org_id_key_path": "/path/to/your/KEY_TO_OPENAI_ORG_ID"
+    "google_ai_api_key_key_path": "/path/to/your/KEY_TO_GOOGLE_API_KEY"
   }
 }
 ```
