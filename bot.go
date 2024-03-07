@@ -546,7 +546,7 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	model := client.GenerativeModel(conf.GoogleGenerativeModel)
 
 	// set safety settings
-	model.SafetySettings = safetySettings(genai.HarmBlockNone)
+	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh)
 
 	if generated, err := model.GenerateContent(
 		ctx,
