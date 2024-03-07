@@ -544,10 +544,14 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	username := userName(message.From)
 
 	model := client.GenerativeModel(conf.GoogleGenerativeModel)
+
+	// set safety settings
+	model.SafetySettings = safetySettings(genai.HarmBlockNone)
+
 	if generated, err := model.GenerateContent(
 		ctx,
 		genai.Text(fmt.Sprintf(
-			`Current time is %s. Return a JSON string with keys 'text' and 'datetime', where 'datetime' is in "yyyy.mm.dd hh:MM" format, and each value is extracted from the following text: %s.`,
+			`Current time is %s. Return a JSON string with keys 'text' and 'datetime', where 'datetime' is in "yyyy.mm.dd hh:MM" format, and each value is inferred/extracted from the following text: %s.`,
 			datetimeToStr(time.Now()),
 			text,
 		)),
@@ -682,6 +686,35 @@ func filterParsed(conf config, parsed []parsedItem) (filtered []parsedItem) {
 	}
 
 	return filtered
+}
+
+// generate safety settings for all supported harm categories
+func safetySettings(threshold genai.HarmBlockThreshold) (settings []*genai.SafetySetting) {
+	for _, category := range []genai.HarmCategory{
+		/*
+			// categories for PaLM 2 (Legacy) models
+			genai.HarmCategoryUnspecified,
+			genai.HarmCategoryDerogatory,
+			genai.HarmCategoryToxicity,
+			genai.HarmCategoryViolence,
+			genai.HarmCategorySexual,
+			genai.HarmCategoryMedical,
+			genai.HarmCategoryDangerous,
+		*/
+
+		// all categories supported by Gemini models
+		genai.HarmCategoryHarassment,
+		genai.HarmCategoryHateSpeech,
+		genai.HarmCategorySexuallyExplicit,
+		genai.HarmCategoryDangerousContent,
+	} {
+		settings = append(settings, &genai.SafetySetting{
+			Category:  category,
+			Threshold: threshold,
+		})
+	}
+
+	return settings
 }
 
 // generate user's name
