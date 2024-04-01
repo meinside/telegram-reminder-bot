@@ -1019,11 +1019,12 @@ func logErrorAndDie(db *Database, format string, a ...any) {
 
 // default reply markup
 func defaultReplyMarkup() tg.ReplyKeyboardMarkup {
+	resize := true
 	return tg.ReplyKeyboardMarkup{ // show keyboards
 		Keyboard: [][]tg.KeyboardButton{
 			tg.NewKeyboardButtons(cmdListReminders, cmdCancel, cmdStats, cmdHelp),
 		},
-		ResizeKeyboard: true,
+		ResizeKeyboard: &resize,
 	}
 }
 
