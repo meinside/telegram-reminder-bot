@@ -318,7 +318,7 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 					message,
 					tg.OptionsSendMessage{}.
 						SetReplyMarkup(defaultReplyMarkup()).
-						SetReplyParameters(tg.ReplyParameters{MessageID: q.MessageID}))
+						SetReplyParameters(tg.NewReplyParameters(q.MessageID)))
 
 				if sent.Ok {
 					// mark as delivered
@@ -375,9 +375,9 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 						msg = msgSelectWhat
 
 						// options for inline keyboards
-						options.SetReplyMarkup(tg.InlineKeyboardMarkup{
-							InlineKeyboard: datetimeButtonsForCallbackQuery(parsed, chatID, message.MessageID),
-						})
+						options.SetReplyMarkup(tg.NewInlineKeyboardMarkup(
+							datetimeButtonsForCallbackQuery(parsed, chatID, message.MessageID),
+						))
 					} else {
 						msg = msgError
 					}
@@ -514,7 +514,7 @@ func send(bot *tg.Bot, conf config, db *Database, message string, chatID int64, 
 		SetReplyMarkup(defaultReplyMarkup()).
 		SetParseMode(tg.ParseModeHTML)
 	if messageID != nil {
-		options.SetReplyParameters(tg.ReplyParameters{MessageID: *messageID})
+		options.SetReplyParameters(tg.NewReplyParameters(*messageID))
 	}
 	if res := bot.SendMessage(chatID, message, options); !res.Ok {
 		logError(db, "failed to send message: %s", *res.Description)
@@ -869,18 +869,13 @@ func cancelCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 					buttons := tg.NewInlineKeyboardButtonsAsRowsWithCallbackData(keys)
 
 					// add a cancel button for canceling reminder
-					cancel := cmdCancel
 					buttons = append(buttons, []tg.InlineKeyboardButton{
-						{
-							Text:         msgCancel,
-							CallbackData: &cancel,
-						},
+						tg.NewInlineKeyboardButton(msgCancel).
+							SetCallbackData(cmdCancel),
 					})
 
 					// options
-					options.SetReplyMarkup(tg.InlineKeyboardMarkup{
-						InlineKeyboard: buttons,
-					})
+					options.SetReplyMarkup(tg.NewInlineKeyboardMarkup(buttons))
 
 					msg = msgCancelWhat
 				} else {
@@ -1019,13 +1014,11 @@ func logErrorAndDie(db *Database, format string, a ...any) {
 
 // default reply markup
 func defaultReplyMarkup() tg.ReplyKeyboardMarkup {
-	resize := true
-	return tg.ReplyKeyboardMarkup{ // show keyboards
-		Keyboard: [][]tg.KeyboardButton{
+	return tg.NewReplyKeyboardMarkup( // show keyboards
+		[][]tg.KeyboardButton{
 			tg.NewKeyboardButtons(cmdListReminders, cmdCancel, cmdStats, cmdHelp),
-		},
-		ResizeKeyboard: &resize,
-	}
+		}).
+		SetResizeKeyboard(true)
 }
 
 // generate inline keyboard buttons for multiple datetimes
@@ -1046,12 +1039,9 @@ func datetimeButtonsForCallbackQuery(items []parsedItem, chatID int64, messageID
 	buttons := tg.NewInlineKeyboardButtonsAsRowsWithCallbackData(keys)
 
 	// add cancel button
-	cancel := cmdCancel
 	buttons = append(buttons, []tg.InlineKeyboardButton{
-		{
-			Text:         msgCancel,
-			CallbackData: &cancel,
-		},
+		tg.NewInlineKeyboardButton(msgCancel).
+			SetCallbackData(cmdCancel),
 	})
 
 	return buttons
