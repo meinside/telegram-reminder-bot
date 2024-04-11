@@ -28,7 +28,6 @@ const (
 	intervalSeconds = 1
 
 	cmdStart         = "/start" // (internal)
-	cmdCount         = "/count"
 	cmdStats         = "/stats"
 	cmdHelp          = "/help"
 	cmdCancel        = "/cancel"
@@ -45,7 +44,6 @@ const (
 
 /list : list all the active reminders.
 /cancel : cancel a reminder.
-/count [some_text] : count the number of tokens in a given text.
 /stats : show stats of this bot.
 /help : show this help message.
 
@@ -242,7 +240,7 @@ func runBot(conf config) {
 				return
 			}
 
-			handleCallbackQuery(b, client, conf, db, update, callbackQuery)
+			handleCallbackQuery(b, db, callbackQuery)
 		})
 
 		// set command handlers
@@ -250,7 +248,6 @@ func runBot(conf config) {
 		bot.AddCommandHandler(cmdListReminders, listRemindersCommandHandler(conf, db))
 		bot.AddCommandHandler(cmdStats, statsCommandHandler(conf, db))
 		bot.AddCommandHandler(cmdHelp, helpCommandHandler(conf, db))
-		bot.AddCommandHandler(cmdCount, countCommandHandler(conf, db))
 		bot.AddCommandHandler(cmdCancel, cancelCommandHandler(conf, db))
 		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(conf, db))
 
@@ -408,7 +405,7 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 }
 
 // handle allowed callback query from telegram bot api
-func handleCallbackQuery(b *tg.Bot, client *genai.Client, conf config, db *Database, update tg.Update, query tg.CallbackQuery) {
+func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 	data := *query.Data
 
 	msg := msgError
@@ -534,6 +531,31 @@ type responseJSON struct {
 	Datetime *string `json:"datetime,omitempty"`
 }
 
+// function declarations for genai model
+func fnDeclarations_reserveMessage(conf config) []*genai.FunctionDeclaration {
+	return []*genai.FunctionDeclaration{
+		{
+			Name:        "reserveMessage",
+			Description: "This function reserves a text message and sends it back at the desired time.",
+			Parameters: &genai.Schema{
+				Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{
+					"text": {
+						Type:        genai.TypeString,
+						Description: "A message text to reserve.",
+						Nullable:    false,
+					},
+					"datetime": {
+						Type:        genai.TypeString,
+						Description: fmt.Sprintf("A datetime string in \"yyyy.mm.dd hh:MM\" format, when the 'text' message should be sent back. If the date is unclear, assume it to be null. If the time is unclear, assume it to be \"%02d:00\".", conf.DefaultHour),
+						Nullable:    true,
+					},
+				},
+			},
+		},
+	}
+}
+
 // parse given string and return the function call
 func parse(ctx context.Context, client *genai.Client, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
 	result = []parsedItem{}
@@ -548,10 +570,17 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	// set safety settings
 	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh)
 
+	// set function declarations
+	model.Tools = []*genai.Tool{
+		{
+			FunctionDeclarations: fnDeclarations_reserveMessage(conf),
+		},
+	}
+
 	if generated, err := model.GenerateContent(
 		ctx,
 		genai.Text(fmt.Sprintf(
-			`Current time is %s. Return a JSON string with keys 'text' and 'datetime', where 'datetime' is in "yyyy.mm.dd hh:MM" format, and each value is inferred/extracted from the following text: %s.`,
+			`Current time is %s. Process following text: %s.`,
 			datetimeToStr(time.Now()),
 			text,
 		)),
@@ -575,17 +604,20 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 
 				if len(content.Parts) > 0 {
 					part := content.Parts[0]
-					if generatedText, ok := part.(genai.Text); ok {
-						logDebug(conf, "Generated text: %s", generatedText)
 
-						bytes := []byte(removeMarkdown(string(generatedText)))
-						if bytes, err := standardizeJSON(bytes); err == nil {
-							var res responseJSON
-							if err := json.Unmarshal(bytes, &res); err == nil {
-								if res.Datetime != nil {
-									if t, err := time.ParseInLocation(datetimeFormat, *res.Datetime, _location); err == nil {
+					if fnCall, ok := part.(genai.FunctionCall); ok {
+						if fnCall.Name == "reserveMessage" {
+							var text string
+							if txt, exists := fnCall.Args["text"]; exists {
+								if txt, ok := txt.(string); ok {
+									text = txt
+								}
+							}
+							if dt, exists := fnCall.Args["datetime"]; exists {
+								if dt, ok := dt.(string); ok {
+									if t, err := time.ParseInLocation(datetimeFormat, dt, _location); err == nil {
 										result = append(result, parsedItem{
-											Message:   res.Text,
+											Message:   text,
 											When:      t,
 											Generated: false,
 										})
@@ -595,34 +627,28 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 										logError(db, "failed to parse 'datetime': %s", err)
 									}
 								} else {
-									errs = append(errs, fmt.Errorf("datetime was returned empty"))
+									errs = append(errs, fmt.Errorf("malformed `datetime` in function call: %+v", dt))
 
-									logError(db, "failed to parse 'datetime', was returned empty")
+									logError(db, "malformed `datetime` in funciton call: %+v", dt)
 								}
 							} else {
-								errs = append(errs, fmt.Errorf("failed to parse JSON: %s", err))
+								errs = append(errs, fmt.Errorf("no `datetime` in function call"))
 
-								logError(db, "failed to parse returned JSON string: %s", err)
+								logError(db, "no `datetime` in function call")
 							}
 						} else {
-							errs = append(errs, fmt.Errorf("failed to standardize JSON: %s", err))
+							errs = append(errs, fmt.Errorf("not an expected function name: %s", fnCall.Name))
 
-							logError(db, "failed to standardize generated JSON: %s", err)
+							logError(db, "unexpected function name: %s", fnCall.Name)
 						}
+					} else if text, ok := part.(genai.Text); ok {
+						errs = append(errs, fmt.Errorf("%s", text))
 
-						// log success
-						var numPromptTokens, numGeneratedTokens int32
-						if counted, err := model.CountTokens(ctx, genai.Text(text)); err == nil {
-							numPromptTokens = counted.TotalTokens
-						}
-						if counted, err := model.CountTokens(ctx, generatedText); err == nil {
-							numGeneratedTokens = counted.TotalTokens
-						}
-						savePromptAndResult(db, chatID, userID, username, text, int(numPromptTokens), int(numGeneratedTokens), true)
+						logError(db, "non-function text was returned: %+v", part)
 					} else {
-						errs = append(errs, fmt.Errorf("no text in the part"))
+						errs = append(errs, fmt.Errorf("no usable data in the part"))
 
-						logError(db, "there was no text in the returned part: %+v", part)
+						logError(db, "there was no usable data in the returned part: %+v", part)
 					}
 				} else {
 					errs = append(errs, fmt.Errorf("no part in content"))
@@ -933,30 +959,6 @@ func helpCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Upd
 			messageID := message.MessageID
 
 			send(b, conf, db, helpMessage(), chatID, &messageID)
-		}
-	}
-}
-
-// return a /count command handler
-func countCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
-	return func(b *tg.Bot, update tg.Update, args string) {
-		if !isAllowed(conf, update) {
-			log.Printf("count command not allowed: %s", userNameFromUpdate(update))
-			return
-		}
-
-		if message := messageFromUpdate(update); message != nil {
-			chatID := message.Chat.ID
-			messageID := message.MessageID
-
-			var msg string
-			if count, err := countTokens(args); err == nil {
-				msg = fmt.Sprintf(msgTokenCount, count, len(args))
-			} else {
-				msg = err.Error()
-			}
-
-			send(b, conf, db, msg, chatID, &messageID)
 		}
 	}
 }
