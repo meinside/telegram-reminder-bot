@@ -10,8 +10,6 @@ cloud.google.com/go/compute/metadata v0.2.3/go.mod h1:VAV5nSsACxMJvgaAuX6Pk2Aawl
 cloud.google.com/go/longrunning v0.5.6 h1:xAe8+0YaWoCKr9t1+aWe+OeQgN/iJK1fEgZSXmjuEaE=
 cloud.google.com/go/longrunning v0.5.6/go.mod h1:vUaDrWYOMKRuhiv6JBnn49YxCPz2Ayn9GqyjaBT8/mA=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/GRbit/go-pcre v1.0.1 h1:8F7Wj1rxIq8ejKSXVVW2wE+4I4VnZbuOemrMk8kn3hc=
-github.com/GRbit/go-pcre v1.0.1/go.mod h1:0g7qVGbMpd2Odevd92x1RpaLpR3c3F/Gv2HEnI7CwEA=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
@@ -68,8 +66,6 @@ github.com/jinzhu/now v1.1.5 h1:/o9tlHleP7gOFmsnYNz3RGnqzefHA47wQpKrrdTIwXQ=
 github.com/jinzhu/now v1.1.5/go.mod h1:d3SSVoowX0Lcu0IBviAWJpolVfI5UJVZZ7cO71lE/z8=
 github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/meinside/geektoken v0.0.2 h1:lUQJ6RlR7ZvDRn98mm/BA+v8aVnZlVxYJkPmu7154MY=
-github.com/meinside/geektoken v0.0.2/go.mod h1:A/bwBW3pFh/kpKeujX+YX7KUEG7BGivdp0ev4NWNE+Y=
 github.com/meinside/infisical-go v0.3.1 h1:uonT58566vEnILAdQnVR3xuJQtJAf6meVcEF/f0q5qM=
 github.com/meinside/infisical-go v0.3.1/go.mod h1:djjoLo50nAHY1Ron+/YfLUov9wT0nBVYkWuMvdd63pQ=
 github.com/meinside/telegram-bot-go v0.10.7 h1:j+NrAdqpOaYlGHa9KOHIvxGx4HLyij4Ps85Wmbh/9vc=

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meinside/geektoken"
 	"github.com/meinside/infisical-go"
 	"github.com/meinside/infisical-go/helper"
 	tg "github.com/meinside/telegram-bot-go"
@@ -54,7 +53,7 @@ const (
 	msgError                  = "An error has occurred."
 	msgResponseFormat         = `Will notify "%s" on %s.`
 	msgSaveFailedFormat       = "Failed to save reminder: %s (%s)"
-	msgSelectWhat             = "Which one do you want to select?"
+	msgSelectWhat             = "Which time do you want to select for message: \"%s\"?"
 	msgCancelWhat             = "Which one do you want to cancel?"
 	msgCancel                 = "Cancel"
 	msgParseFailedFormat      = "Failed to understand message: %s"
@@ -150,10 +149,8 @@ func loadConfig(fpath string) (conf config, err error) {
 				if conf.GoogleGenerativeModel == "" {
 					conf.GoogleGenerativeModel = defaultGenerativeModel
 				}
-				if conf.DefaultHour < 0 {
+				if conf.DefaultHour < 0 || conf.DefaultHour >= 24 {
 					conf.DefaultHour = 0
-				} else if conf.DefaultHour >= 24 {
-					conf.DefaultHour = 23
 				}
 			}
 		}
@@ -260,8 +257,7 @@ func runBot(conf config) {
 				}
 
 				// type not supported
-				message := messageFromUpdate(update)
-				if message != nil {
+				if message := messageFromUpdate(update); message != nil {
 					send(b, conf, db, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
 				}
 			} else {
@@ -369,7 +365,7 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 					}
 				} else if len(parsed) > 0 {
 					if _, err := db.SaveTemporaryMessage(chatID, message.MessageID, parsed[0].Message); err == nil {
-						msg = msgSelectWhat
+						msg = fmt.Sprintf(msgSelectWhat, parsed[0].Message)
 
 						// options for inline keyboards
 						options.SetReplyMarkup(tg.NewInlineKeyboardMarkup(
@@ -395,10 +391,12 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 		msg = msgTypeNotSupported
 	}
 
-	// send message
+	// fallback message
 	if len(msg) <= 0 {
 		msg = msgError
 	}
+
+	// send message
 	if sent := bot.SendMessage(chatID, msg, options); !sent.Ok {
 		logError(db, "failed to send message: %s", *sent.Description)
 	}
@@ -556,7 +554,40 @@ func fnDeclarations_reserveMessage(conf config) []*genai.FunctionDeclaration {
 	}
 }
 
-// parse given string and return the function call
+// handle function call
+func handleFnCall(fn genai.FunctionCall) (result parsedItem, err error) {
+	if fn.Name == "reserveMessage" {
+		var text string
+		if txt, exists := fn.Args["text"]; exists {
+			if txt, ok := txt.(string); ok {
+				text = txt
+			}
+		}
+		if dt, exists := fn.Args["datetime"]; exists {
+			if dt, ok := dt.(string); ok {
+				if t, err := time.ParseInLocation(datetimeFormat, dt, _location); err == nil {
+					result = parsedItem{
+						Message:   text,
+						When:      t,
+						Generated: false,
+					}
+				} else {
+					err = fmt.Errorf("failed to parse 'datetime': %s", err)
+				}
+			} else {
+				err = fmt.Errorf("malformed `datetime` in function call: %+v", dt)
+			}
+		} else {
+			err = fmt.Errorf("no `datetime` in function call")
+		}
+	} else {
+		err = fmt.Errorf("no function declaration for name: %s", fn.Name)
+	}
+
+	return result, err
+}
+
+// parse given string, generate items from the parsed ones, and return them
 func parse(ctx context.Context, client *genai.Client, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
 	result = []parsedItem{}
 	errs = []error{}
@@ -565,23 +596,23 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	userID := message.From.ID
 	username := userName(message.From)
 
+	// model for generation
 	model := client.GenerativeModel(conf.GoogleGenerativeModel)
-
-	// set safety settings
-	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh)
-
-	// set function declarations
-	model.Tools = []*genai.Tool{
+	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh) // set safety settings
+	model.Tools = []*genai.Tool{                                   // set function declarations
 		{
 			FunctionDeclarations: fnDeclarations_reserveMessage(conf),
 		},
 	}
 
+	now := datetimeToStr(time.Now())
+
+	// generate text
 	if generated, err := model.GenerateContent(
 		ctx,
 		genai.Text(fmt.Sprintf(
 			`Current time is %s. Process following text: %s.`,
-			datetimeToStr(time.Now()),
+			now,
 			text,
 		)),
 	); err != nil {
@@ -605,47 +636,20 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 				if len(content.Parts) > 0 {
 					part := content.Parts[0]
 
-					if fnCall, ok := part.(genai.FunctionCall); ok {
-						if fnCall.Name == "reserveMessage" {
-							var text string
-							if txt, exists := fnCall.Args["text"]; exists {
-								if txt, ok := txt.(string); ok {
-									text = txt
-								}
-							}
-							if dt, exists := fnCall.Args["datetime"]; exists {
-								if dt, ok := dt.(string); ok {
-									if t, err := time.ParseInLocation(datetimeFormat, dt, _location); err == nil {
-										result = append(result, parsedItem{
-											Message:   text,
-											When:      t,
-											Generated: false,
-										})
-									} else {
-										errs = append(errs, fmt.Errorf("failed to parse 'datetime': %s", err))
-
-										logError(db, "failed to parse 'datetime': %s", err)
-									}
-								} else {
-									errs = append(errs, fmt.Errorf("malformed `datetime` in function call: %+v", dt))
-
-									logError(db, "malformed `datetime` in funciton call: %+v", dt)
-								}
-							} else {
-								errs = append(errs, fmt.Errorf("no `datetime` in function call"))
-
-								logError(db, "no `datetime` in function call")
-							}
+					if fnCall, ok := part.(genai.FunctionCall); ok { // if it is a function call,
+						if handled, err := handleFnCall(fnCall); err == nil {
+							// append result
+							result = append(result, handled)
 						} else {
-							errs = append(errs, fmt.Errorf("not an expected function name: %s", fnCall.Name))
+							errs = append(errs, err)
 
-							logError(db, "unexpected function name: %s", fnCall.Name)
+							logError(db, fmt.Sprintf("failed to handle function call: %s", err))
 						}
-					} else if text, ok := part.(genai.Text); ok {
+					} else if text, ok := part.(genai.Text); ok { // if it is a text,
 						errs = append(errs, fmt.Errorf("%s", text))
 
 						logError(db, "non-function text was returned: %+v", part)
-					} else {
+					} else { // otherwise,
 						errs = append(errs, fmt.Errorf("no usable data in the part"))
 
 						logError(db, "there was no usable data in the returned part: %+v", part)
@@ -657,6 +661,15 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 				}
 			}
 		}
+	}
+
+	// log success
+	if len(errs) <= 0 {
+		var numTokens int32
+		if counted, err := model.CountTokens(ctx, genai.Text(text)); err == nil {
+			numTokens = counted.TotalTokens
+		}
+		savePromptAndResult(db, chatID, userID, username, text, int(numTokens), 0, true)
 	}
 
 	return result, errs
@@ -761,36 +774,6 @@ func userNameFromUpdate(update tg.Update) string {
 	logInfo("there was no `from` in `update`")
 
 	return "unknown"
-}
-
-var _tokenizer *geektoken.Tokenizer = nil
-
-// count BPE tokens for given `text`
-func countTokens(text string) (result int, err error) {
-	result = 0
-
-	// lazy-load the tokenizer
-	if _tokenizer == nil {
-		var tokenizer geektoken.Tokenizer
-		tokenizer, err = geektoken.GetTokenizerWithEncoding(geektoken.EncodingCl100kBase)
-
-		if err == nil {
-			_tokenizer = &tokenizer
-		}
-	}
-
-	if _tokenizer == nil {
-		return 0, fmt.Errorf("tokenizer is not initialized.")
-	}
-
-	var tokens []int
-	tokens, err = _tokenizer.Encode(text, nil, nil)
-
-	if err == nil {
-		return len(tokens), nil
-	}
-
-	return result, err
 }
 
 // save prompt and its result to logs database
@@ -975,8 +958,7 @@ func noSuchCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 			chatID := message.Chat.ID
 			messageID := message.MessageID
 
-			msg := fmt.Sprintf(msgCmdNotSupported, cmd)
-			send(b, conf, db, msg, chatID, &messageID)
+			send(b, conf, db, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 		}
 	}
 }
