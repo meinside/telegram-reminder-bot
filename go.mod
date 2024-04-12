@@ -4,7 +4,6 @@ go 1.21.3
 
 require (
 	github.com/google/generative-ai-go v0.10.0
-	github.com/meinside/geektoken v0.0.2
 	github.com/meinside/infisical-go v0.3.1
 	github.com/meinside/telegram-bot-go v0.10.7
 	github.com/meinside/version-go v0.0.3
@@ -20,7 +19,6 @@ require (
 	cloud.google.com/go/compute v1.25.1 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	cloud.google.com/go/longrunning v0.5.6 // indirect
-	github.com/GRbit/go-pcre v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
