@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -237,9 +240,11 @@ func (d *Database) Stats() string {
 		lines = append(lines, "")
 	}
 
+	printer := message.NewPrinter(language.English) // for adding commas to numbers
+
 	var count int64
 	if tx := d.db.Table("prompts").Select("count(distinct chat_id) as count").Scan(&count); tx.Error == nil {
-		lines = append(lines, fmt.Sprintf("* Chats: <b>%d</b>", count))
+		lines = append(lines, fmt.Sprintf("* Chats: <b>%s</b>", printer.Sprintf("%d", count)))
 	}
 
 	var sumAndCount struct {
@@ -247,13 +252,13 @@ func (d *Database) Stats() string {
 		Count int64
 	}
 	if tx := d.db.Table("prompts").Select("sum(tokens) as sum, count(id) as count").Where("tokens > 0").Scan(&sumAndCount); tx.Error == nil {
-		lines = append(lines, fmt.Sprintf("* Prompts: <b>%d</b> (Total tokens: <b>%d</b>)", sumAndCount.Count, sumAndCount.Sum))
+		lines = append(lines, fmt.Sprintf("* Prompts: <b>%s</b> (Total tokens: <b>%s</b>)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
 	}
 	if tx := d.db.Table("parsed_items").Select("sum(tokens) as sum, count(id) as count").Where("successful = 1").Scan(&sumAndCount); tx.Error == nil {
-		lines = append(lines, fmt.Sprintf("* Completions: <b>%d</b> (Total tokens: <b>%d</b>)", sumAndCount.Count, sumAndCount.Sum))
+		lines = append(lines, fmt.Sprintf("* Completions: <b>%s</b> (Total tokens: <b>%s</b>)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
 	}
 	if tx := d.db.Table("parsed_items").Select("count(id) as count").Where("successful = 0").Scan(&count); tx.Error == nil {
-		lines = append(lines, fmt.Sprintf("* Errors: <b>%d</b>", count))
+		lines = append(lines, fmt.Sprintf("* Errors: <b>%s</b>", printer.Sprintf("%d", count)))
 	}
 
 	if len(lines) > 0 {

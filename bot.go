@@ -38,14 +38,14 @@ const (
 	msgTypeNotSupported      = "Not a supported message type."
 	msgDatabaseNotConfigured = "Database not configured. Set `db_filepath` in your config file."
 	msgDatabaseEmpty         = "Database is empty."
-	msgTokenCount            = "<b>%d</b> tokens in <b>%d</b> chars <i>(cl100k_base)</i>"
 	msgHelp                  = `Help message here:
 
-/list : list all the active reminders.
-/cancel : cancel a reminder.
-/stats : show stats of this bot.
-/help : show this help message.
+<b>/list</b>: list all the active reminders.
+<b>/cancel</b>: cancel a reminder.
+<b>/stats</b>: show stats of this bot.
+<b>/help</b>: show this help message.
 
+<i>model: %s</i>
 <i>version: %s</i>
 `
 	msgCommandCanceled        = "Command was canceled."
@@ -796,8 +796,8 @@ func savePromptAndResult(db *Database, chatID, userID int64, username string, pr
 }
 
 // generate a help message with version info
-func helpMessage() string {
-	return fmt.Sprintf(msgHelp, version.Build(version.OS|version.Architecture|version.Revision))
+func helpMessage(conf config) string {
+	return fmt.Sprintf(msgHelp, conf.GoogleGenerativeModel, version.Build(version.OS|version.Architecture|version.Revision))
 }
 
 // return a /start command handler
@@ -941,7 +941,7 @@ func helpCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Upd
 			chatID := message.Chat.ID
 			messageID := message.MessageID
 
-			send(b, conf, db, helpMessage(), chatID, &messageID)
+			send(b, conf, db, helpMessage(conf), chatID, &messageID)
 		}
 	}
 }
