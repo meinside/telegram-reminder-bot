@@ -645,6 +645,17 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 			FunctionDeclarations: fnDeclarations(conf),
 		},
 	}
+	model.ToolConfig = &genai.ToolConfig{
+		FunctionCallingConfig: &genai.FunctionCallingConfig{
+			Mode: genai.FunctionCallingAuto,
+			/*
+				Mode: genai.FunctionCallingAny,
+				AllowedFunctionNames: []string{
+					fnNameReserveMessages,
+				},
+			*/
+		},
+	}
 
 	now := datetimeToStr(time.Now())
 
