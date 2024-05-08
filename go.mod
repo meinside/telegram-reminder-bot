@@ -5,11 +5,11 @@ go 1.21.3
 require (
 	github.com/google/generative-ai-go v0.11.2
 	github.com/meinside/infisical-go v0.3.1
-	github.com/meinside/telegram-bot-go v0.10.7
+	github.com/meinside/telegram-bot-go v0.10.8
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a
 	golang.org/x/text v0.15.0
-	google.golang.org/api v0.177.0
+	google.golang.org/api v0.178.0
 	gorm.io/driver/sqlite v1.5.5
 	gorm.io/gorm v1.25.10
 )
@@ -17,7 +17,7 @@ require (
 require (
 	cloud.google.com/go v0.112.2 // indirect
 	cloud.google.com/go/ai v0.4.1 // indirect
-	cloud.google.com/go/auth v0.3.0 // indirect
+	cloud.google.com/go/auth v0.4.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.2 // indirect
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	cloud.google.com/go/longrunning v0.5.7 // indirect
