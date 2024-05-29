@@ -33,11 +33,11 @@ const (
 	cmdLoad          = "/load" // (internal)
 	cmdListReminders = "/list"
 
-	msgStart                 = "This bot will reserve your messages and notify you at desired times, with ChatGPT API :-)"
-	msgCmdNotSupported       = "Not a supported bot command: %s"
-	msgTypeNotSupported      = "Not a supported message type."
-	msgDatabaseNotConfigured = "Database not configured. Set `db_filepath` in your config file."
-	msgDatabaseEmpty         = "Database is empty."
+	msgStart                 = `This bot will reserve your messages and notify you at desired times, with ChatGPT API :-)`
+	msgCmdNotSupported       = `Not a supported bot command: %s`
+	msgTypeNotSupported      = `Not a supported message type.`
+	msgDatabaseNotConfigured = `Database not configured. Set 'db_filepath' in your config file.`
+	msgDatabaseEmpty         = `Database is empty.`
 	msgHelp                  = `Help message here:
 
 <b>/list</b>: list all the active reminders.
@@ -48,28 +48,36 @@ const (
 <i>model: %s</i>
 <i>version: %s</i>
 `
-	msgCommandCanceled        = "Command was canceled."
-	msgReminderCanceledFormat = "Reminder was canceled: %s"
-	msgError                  = "An error has occurred."
+	msgCommandCanceled        = `Command was canceled.`
+	msgReminderCanceledFormat = `Reminder was canceled: %s`
+	msgError                  = `An error has occurred.`
 	msgResponseFormat         = `Will notify "%s" on %s.`
-	msgSaveFailedFormat       = "Failed to save reminder: %s (%s)"
-	msgSelectWhat             = "Which time do you want to select for message: \"%s\"?"
-	msgCancelWhat             = "Which one do you want to cancel?"
-	msgCancel                 = "Cancel"
-	msgParseFailedFormat      = "Failed to understand message: %s"
-	msgListItemFormat         = "☑ %s; %s"
-	msgNoReminders            = "There is no registered reminder."
-	msgNoClue                 = "There was no clue for the time in the message."
+	msgSaveFailedFormat       = `Failed to save reminder: %s (%s)`
+	msgSelectWhat             = `Which time do you want to select for message: "%s"?`
+	msgCancelWhat             = `Which one do you want to cancel?`
+	msgCancel                 = `Cancel`
+	msgParseFailedFormat      = `Failed to understand message: %s`
+	msgListItemFormat         = `☑ %s; %s`
+	msgNoReminders            = `There is no registered reminder.`
+	msgNoClue                 = `There was no clue for the time in the message.`
 
-	fnNameReserveMessages = "reserveMessages"
+	systemInstruction = `You are a kind and considerate chat bot who reserves messages from the user and send them back at the user's desired times. Current time is %s.`
 
-	datetimeFormat = "2006.01.02 15:04" // yyyy.mm.dd hh:MM
+	// function call
+	fnNameReserveMessages             = `reserve_messages`
+	fnDescriptionReserveMessages      = `Reserve given text message and send it back to the user at the desired datetime.`
+	fnArgNameReservedText             = `reserved_text`
+	fnArgDescriptionReservedText      = `A message text to reserve.`
+	fnArgNameScheduledDatetime        = `scheduled_datetime`
+	fnArgDescriptionScheduledDatetime = `A datetime when the text message should be sent back in "yyyy.mm.dd hh:MM" format. When the hour/minute value is missing, fallback value is "%02d:00".`
+
+	datetimeFormat = `2006.01.02 15:04` // yyyy.mm.dd hh:MM
 
 	// default configs
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	defaultGenerativeModel         = "gemini-pro"
+	defaultGenerativeModel         = "gemini-1.5-pro-latest"
 )
 
 var _location *time.Location
@@ -470,12 +478,14 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 	}
 
 	// answer callback query
-	if apiResult := b.AnswerCallbackQuery(query.ID, map[string]interface{}{"text": msg}); apiResult.Ok {
+	if apiResult := b.AnswerCallbackQuery(
+		query.ID,
+		tg.OptionsAnswerCallbackQuery{}.
+			SetText(msg),
+	); apiResult.Ok {
 		// edit message and remove inline keyboards
-		options := map[string]interface{}{
-			"chat_id":    query.Message.Chat.ID,
-			"message_id": query.Message.MessageID,
-		}
+		options := tg.OptionsEditMessageText{}.
+			SetIDs(query.Message.Chat.ID, query.Message.MessageID)
 		if apiResult := b.EditMessageText(msg, options); !apiResult.Ok {
 			logError(db, "failed to edit message text: %s", *apiResult.Description)
 		}
@@ -527,8 +537,8 @@ type parsedItem struct {
 
 // response JSON type
 type responseJSON struct {
-	Text     string  `json:"text"`
-	Datetime *string `json:"datetime,omitempty"`
+	Text     string  `json:"reserved_text"`
+	Datetime *string `json:"scheduled_datetime,omitempty"`
 }
 
 // function declarations for genai model
@@ -536,71 +546,56 @@ func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 	return []*genai.FunctionDeclaration{
 		{
 			Name:        fnNameReserveMessages,
-			Description: "This function reserves text messages and sends them back at the desired time.",
+			Description: "Reserve given text message and send it back to the user at the desired datetime.",
 			Parameters: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
-					"items": {
-						Type: genai.TypeArray,
-						Items: &genai.Schema{
-							Type: genai.TypeObject,
-							Properties: map[string]*genai.Schema{
-								"text": {
-									Type:        genai.TypeString,
-									Description: "A message text to reserve.",
-									Nullable:    false,
-								},
-								"datetime": {
-									Type:        genai.TypeString,
-									Description: fmt.Sprintf("A datetime value when the 'text' message should be sent back in \"yyyy.mm.dd hh:MM\" format. Fallback hour/minute value is \"%02d:00\".", conf.DefaultHour),
-									Nullable:    false,
-								},
-							},
-						},
-						Nullable: false,
+					fnArgNameReservedText: {
+						Type:        genai.TypeString,
+						Description: fnArgDescriptionReservedText,
+						Nullable:    false,
+					},
+					fnArgNameScheduledDatetime: {
+						Type:        genai.TypeString,
+						Description: fmt.Sprintf(fnArgDescriptionScheduledDatetime, conf.DefaultHour),
+						Nullable:    false,
 					},
 				},
+				Nullable: false,
 			},
 		},
 	}
 }
 
 // handle function call
-func handleFnCall(fn genai.FunctionCall) (result []parsedItem, err error) {
+func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err error) {
+	logDebug(conf, "[verbose] handling function call: %+v", fn)
+
 	result = []parsedItem{}
 
 	if fn.Name == fnNameReserveMessages {
-		if items := val[[]any](fn.Args, "items"); len(items) > 0 {
-			for _, item := range items {
-				if item, ok := item.(map[string]any); ok {
-					text := val[string](item, "text")
-					datetime := val[string](item, "datetime")
+		text := val[string](fn.Args, fnArgNameReservedText)
+		datetime := val[string](fn.Args, fnArgNameScheduledDatetime)
 
-					if text != "" && datetime != "" {
-						if t, err := time.ParseInLocation(datetimeFormat, datetime, _location); err == nil {
-							result = append(result, parsedItem{
-								Message:   text,
-								When:      t,
-								Generated: false,
-							})
-						} else {
-							err = fmt.Errorf("failed to parse datetime (%s) in function call: %s", err, prettify(item))
-							break
-						}
-					} else {
-						err = fmt.Errorf("invalid `text` or `datetime` in function call: %s", prettify(item))
-						break
-					}
-				} else {
-					err = fmt.Errorf("invalid item in function call: %s", prettify(item))
-					break
-				}
+		if text != "" && datetime != "" {
+			if t, err := time.ParseInLocation(datetimeFormat, datetime, _location); err == nil {
+				result = append(result, parsedItem{
+					Message:   text,
+					When:      t,
+					Generated: false,
+				})
+			} else {
+				err = fmt.Errorf("failed to parse datetime (%s) in function call: %s", err, prettify(fn.Args))
 			}
 		} else {
-			err = fmt.Errorf("invalid items in function call arguments: %s", prettify(fn.Args))
+			err = fmt.Errorf("invalid `text` or `datetime` in function call: %s", prettify(fn.Args))
 		}
 	} else {
 		err = fmt.Errorf("no function declaration for name: %s", fn.Name)
+	}
+
+	if err != nil {
+		logDebug(conf, "[verbose] there was an error with returned function call: %+v", fn)
 	}
 
 	return result, err
@@ -647,26 +642,26 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	}
 	model.ToolConfig = &genai.ToolConfig{
 		FunctionCallingConfig: &genai.FunctionCallingConfig{
-			Mode: genai.FunctionCallingAuto,
-			/*
-				Mode: genai.FunctionCallingAny,
-				AllowedFunctionNames: []string{
-					fnNameReserveMessages,
-				},
-			*/
+			Mode: genai.FunctionCallingAny,
+			AllowedFunctionNames: []string{
+				fnNameReserveMessages,
+			},
 		},
 	}
 
+	// system instruction
 	now := datetimeToStr(time.Now())
+	model.SystemInstruction = &genai.Content{
+		Role: "model",
+		Parts: []genai.Part{
+			genai.Text(fmt.Sprintf(systemInstruction, now)),
+		},
+	}
 
 	// generate text
 	if generated, err := model.GenerateContent(
 		ctx,
-		genai.Text(fmt.Sprintf(
-			`Current time is %s. Process following text: %s.`,
-			now,
-			text,
-		)),
+		genai.Text(text),
 	); err != nil {
 		errs = append(errs, fmt.Errorf("failed to generate text: %s", err))
 
@@ -689,7 +684,7 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 					part := content.Parts[0]
 
 					if fnCall, ok := part.(genai.FunctionCall); ok { // if it is a function call,
-						if handled, err := handleFnCall(fnCall); err == nil {
+						if handled, err := handleFnCall(conf, fnCall); err == nil {
 							// append result
 							result = append(result, handled...)
 						} else {
