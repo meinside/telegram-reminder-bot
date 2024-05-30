@@ -640,14 +640,17 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 			FunctionDeclarations: fnDeclarations(conf),
 		},
 	}
-	model.ToolConfig = &genai.ToolConfig{
-		FunctionCallingConfig: &genai.FunctionCallingConfig{
-			Mode: genai.FunctionCallingAny,
-			AllowedFunctionNames: []string{
-				fnNameReserveMessages,
+	// FIXME: (2024-05-30) googleapi: Error 400: Function calling mode `ANY` is not enabled for api version v1beta
+	/*
+		model.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingAny,
+				AllowedFunctionNames: []string{
+					fnNameReserveMessages,
+				},
 			},
-		},
-	}
+		}
+	*/
 
 	// system instruction
 	now := datetimeToStr(time.Now())
