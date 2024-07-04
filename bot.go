@@ -1076,7 +1076,8 @@ func logErrorAndDie(db *Database, format string, a ...any) {
 func defaultReplyMarkup() tg.ReplyKeyboardMarkup {
 	return tg.NewReplyKeyboardMarkup( // show keyboards
 		[][]tg.KeyboardButton{
-			tg.NewKeyboardButtons(cmdListReminders, cmdCancel, cmdStats, cmdHelp),
+			tg.NewKeyboardButtons(cmdListReminders, cmdCancel, cmdStats),
+			tg.NewKeyboardButtons(cmdPrivacy, cmdHelp),
 		}).
 		SetResizeKeyboard(true)
 }
