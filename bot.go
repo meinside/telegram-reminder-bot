@@ -56,6 +56,7 @@ const (
 
 <i>model: %s</i>
 <i>version: %s</i>
+<i>source code: <a href="%s">github</a></i>
 `
 	msgCommandCanceled        = `Command was canceled.`
 	msgReminderCanceledFormat = `Reminder was canceled: %s`
@@ -69,7 +70,7 @@ const (
 	msgListItemFormat         = `☑ %s; %s`
 	msgNoReminders            = `There is no registered reminder.`
 	msgNoClue                 = `There was no clue for the time in the message.`
-	msgPrivacy                = `<a href="https://github.com/meinside/telegram-reminder-bot/raw/master/PRIVACY.md">Privacy Policy</a>`
+	msgPrivacy                = "Privacy Policy:\n\n" + githubPageURL + `/raw/master/PRIVACY.md`
 
 	systemInstruction = `You are a kind and considerate chat bot who reserves messages from the user and send them back at the user's desired times. Current time is %s.`
 
@@ -88,6 +89,8 @@ const (
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
 	defaultGenerativeModel         = "gemini-1.5-pro-latest"
+
+	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
 
 var _location *time.Location
@@ -862,7 +865,7 @@ func savePromptAndResult(db *Database, chatID, userID int64, username string, pr
 
 // generate a help message with version info
 func helpMessage(conf config) string {
-	return fmt.Sprintf(msgHelp, conf.GoogleGenerativeModel, version.Build(version.OS|version.Architecture|version.Revision))
+	return fmt.Sprintf(msgHelp, conf.GoogleGenerativeModel, version.Build(version.OS|version.Architecture|version.Revision), githubPageURL)
 }
 
 // return a /start command handler
