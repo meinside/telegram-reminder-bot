@@ -384,6 +384,8 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 	bot.SendChatAction(chatID, tg.ChatActionTyping, tg.OptionsSendChatAction{})
 
 	if message := messageFromUpdate(update); message != nil {
+		options.SetReplyParameters(tg.NewReplyParameters(message.MessageID))
+
 		if message.HasText() {
 			txt := *message.Text
 			if parsed, errs := parse(ctx, client, conf, db, *message, txt); len(parsed) > 0 {
@@ -908,8 +910,6 @@ func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, upda
 		if message := messageFromUpdate(update); message != nil {
 			var msg string
 			chatID := message.Chat.ID
-			options := tg.OptionsSendMessage{}.
-				SetReplyMarkup(defaultReplyMarkup())
 
 			if reminders, err := db.UndeliveredQueueItems(chatID); err == nil {
 				if len(reminders) > 0 {
@@ -928,9 +928,7 @@ func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, upda
 			if len(msg) <= 0 {
 				msg = msgError
 			}
-			if sent := b.SendMessage(chatID, msg, options); !sent.Ok {
-				logError(db, "failed to send message: %s", *sent.Description)
-			}
+			send(b, conf, db, msg, chatID, nil)
 		}
 	}
 }
