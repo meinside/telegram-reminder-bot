@@ -75,12 +75,12 @@ const (
 	systemInstruction = `You are a kind and considerate chat bot who reserves messages from the user and send them back at the user's desired times. Current time is %s.`
 
 	// function call
-	fnNameReserveMessages             = `reserve_messages`
-	fnDescriptionReserveMessages      = `Reserve given text message and send it back to the user at the desired datetime.`
+	fnNameReserveMessage              = `reserve_message`
+	fnDescriptionReserveMessage       = `Reserve a message and send it back to the user at the desired datetime.`
 	fnArgNameReservedText             = `reserved_text`
-	fnArgDescriptionReservedText      = `A message text to reserve.`
+	fnArgDescriptionReservedText      = `The text of reserved message.`
 	fnArgNameScheduledDatetime        = `scheduled_datetime`
-	fnArgDescriptionScheduledDatetime = `A datetime when the text message should be sent back in "yyyy.mm.dd hh:MM" format. When the hour/minute value is missing, fallback value is "%02d:00".`
+	fnArgDescriptionScheduledDatetime = `A datetime when the message should be sent back in "yyyy.mm.dd hh:MM" format. When the hour/minute value is missing, fallback value is "%02d:00".`
 
 	datetimeFormat = `2006.01.02 15:04` // yyyy.mm.dd hh:MM
 
@@ -88,7 +88,8 @@ const (
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	defaultGenerativeModel         = "gemini-1.5-pro-latest"
+	//defaultGenerativeModel = "gemini-1.5-flash-latest"
+	defaultGenerativeModel = "gemini-1.5-pro-latest"
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
@@ -383,9 +384,11 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 	bot.SendChatAction(chatID, tg.ChatActionTyping, tg.OptionsSendChatAction{})
 
 	if message := messageFromUpdate(update); message != nil {
+		options.SetReplyParameters(tg.NewReplyParameters(message.MessageID))
+
 		if message.HasText() {
 			txt := *message.Text
-			if parsed, errs := parse(ctx, client, conf, db, *message, txt); len(errs) == 0 {
+			if parsed, errs := parse(ctx, client, conf, db, *message, txt); len(parsed) > 0 {
 				parsed = filterParsed(conf, parsed)
 
 				if len(parsed) == 1 {
@@ -517,7 +520,7 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 			logError(db, "failed to edit message text: %s", *apiResult.Description)
 		}
 	} else {
-		logError(db, "failed to answer callback query: %+v", query)
+		logError(db, "failed to answer callback query: %s", prettify(query))
 	}
 }
 
@@ -566,8 +569,8 @@ type parsedItem struct {
 func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 	return []*genai.FunctionDeclaration{
 		{
-			Name:        fnNameReserveMessages,
-			Description: "Reserve given text message and send it back to the user at the desired datetime.",
+			Name:        fnNameReserveMessage,
+			Description: fnDescriptionReserveMessage,
 			Parameters: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
@@ -590,11 +593,11 @@ func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 
 // handle function call
 func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err error) {
-	logDebug(conf, "[verbose] handling function call: %+v", fn)
+	logDebug(conf, "[verbose] handling function call: %s", prettify(fn))
 
 	result = []parsedItem{}
 
-	if fn.Name == fnNameReserveMessages {
+	if fn.Name == fnNameReserveMessage {
 		text := val[string](fn.Args, fnArgNameReservedText)
 		datetime := val[string](fn.Args, fnArgNameScheduledDatetime)
 
@@ -616,7 +619,7 @@ func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err 
 	}
 
 	if err != nil {
-		logDebug(conf, "[verbose] there was an error with returned function call: %+v", fn)
+		logDebug(conf, "[verbose] there was an error with returned function call: %s", err)
 	}
 
 	return result, err
@@ -661,13 +664,24 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 			FunctionDeclarations: fnDeclarations(conf),
 		},
 	}
-	model.ToolConfig = &genai.ToolConfig{
-		FunctionCallingConfig: &genai.FunctionCallingConfig{
-			Mode: genai.FunctionCallingAny,
-			AllowedFunctionNames: []string{
-				fnNameReserveMessages,
+	// NOTE: `genai.FunctionCallingAny` is only available for `gemini-1.5-pro*`
+	//
+	// https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling
+	if strings.Contains(conf.GoogleGenerativeModel, "gemini-1.5-pro") {
+		model.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingAny,
+				AllowedFunctionNames: []string{
+					fnNameReserveMessage,
+				},
 			},
-		},
+		}
+	} else {
+		model.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingAuto,
+			},
+		}
 	}
 
 	// system instruction
@@ -695,6 +709,8 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 
 		logError(db, "failed to generate text: %s", err)
 	} else {
+		logDebug(conf, "[verbose] generated: %s", prettify(generated))
+
 		if len(generated.Candidates) <= 0 {
 			logError(db, "there was no returned candidate")
 		} else {
@@ -702,31 +718,30 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 				content := candidate.Content
 
 				if len(content.Parts) > 0 {
-					part := content.Parts[0]
+					for _, part := range content.Parts {
+						if fnCall, ok := part.(genai.FunctionCall); ok { // if it is a function call,
+							if handled, err := handleFnCall(conf, fnCall); err == nil {
+								// append result
+								result = append(result, handled...)
+							} else {
+								errs = append(errs, err)
 
-					if fnCall, ok := part.(genai.FunctionCall); ok { // if it is a function call,
-						if handled, err := handleFnCall(conf, fnCall); err == nil {
-							// append result
-							result = append(result, handled...)
-						} else {
-							errs = append(errs, err)
-
-							logError(db, fmt.Sprintf("failed to handle function call: %s", err))
+								logError(db, fmt.Sprintf("failed to handle function call: %s", err))
+							}
+							break
 						}
-					} else if text, ok := part.(genai.Text); ok { // if it is a text,
-						errs = append(errs, fmt.Errorf("%s", text))
-
-						logError(db, "non-function text was returned: %+v", part)
-					} else { // otherwise,
-						errs = append(errs, fmt.Errorf("no usable data in the part"))
-
-						logError(db, "there was no usable data in the returned part: %+v", part)
 					}
 				} else {
 					errs = append(errs, fmt.Errorf("no part in content"))
 
 					logError(db, "there was no part in the returned content")
 				}
+			}
+
+			if len(result) <= 0 {
+				errs = append(errs, fmt.Errorf("no function call in parts"))
+
+				logError(db, "there was no usable function call in the returned parts")
 			}
 		}
 	}
@@ -895,8 +910,6 @@ func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, upda
 		if message := messageFromUpdate(update); message != nil {
 			var msg string
 			chatID := message.Chat.ID
-			options := tg.OptionsSendMessage{}.
-				SetReplyMarkup(defaultReplyMarkup())
 
 			if reminders, err := db.UndeliveredQueueItems(chatID); err == nil {
 				if len(reminders) > 0 {
@@ -915,9 +928,7 @@ func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, upda
 			if len(msg) <= 0 {
 				msg = msgError
 			}
-			if sent := b.SendMessage(chatID, msg, options); !sent.Ok {
-				logError(db, "failed to send message: %s", *sent.Description)
-			}
+			send(b, conf, db, msg, chatID, nil)
 		}
 	}
 }
