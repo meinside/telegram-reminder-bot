@@ -19,7 +19,7 @@ Reserve messages with natural language like:
 * A [Google API key](https://aistudio.google.com/app/apikey), and
 * a machine which can build and run golang applications.
 
-Gemini 1.5 Pro model is needed for several features. (eg. system instruction, etc.)
+Gemini 1.5 Pro or Flash model is needed for several features. (eg. system instruction, etc.)
 
 ## Configurations
 
@@ -34,7 +34,7 @@ and set your values:
 
 ```json
 {
-  "google_generative_model": "gemini-1.5-pro-latest",
+  "google_generative_model": "gemini-1.5-flash-latest",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": "/path/to/reminder-db.sqlite",
@@ -52,7 +52,7 @@ You can use [Infisical](https://infisical.com/) for retrieving your bot token an
 
 ```json
 {
-  "google_generative_model": "gemini-1.5-pro-latest",
+  "google_generative_model": "gemini-1.5-flash-latest",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,

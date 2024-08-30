@@ -20,6 +20,7 @@ import (
 
 	// google ai
 	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 
 	// my libraries
@@ -59,28 +60,28 @@ const (
 <i>source code: <a href="%s">github</a></i>
 `
 	msgCommandCanceled        = `Command was canceled.`
-	msgReminderCanceledFormat = `Reminder was canceled: %s`
+	msgReminderCanceledFormat = `Reminder '%s' was canceled.`
 	msgError                  = `An error has occurred.`
-	msgResponseFormat         = `Will notify "%s" on %s.`
-	msgSaveFailedFormat       = `Failed to save reminder: %s (%s)`
-	msgSelectWhat             = `Which time do you want to select for message: "%s"?`
+	msgResponseFormat         = `Will notify '%s' on %s.`
+	msgSaveFailedFormat       = `Failed to save reminder '%s': %s`
+	msgSelectWhat             = `Which time do you want for message: '%s'?`
 	msgCancelWhat             = `Which one do you want to cancel?`
 	msgCancel                 = `Cancel`
 	msgParseFailedFormat      = `Failed to understand message: %s`
 	msgListItemFormat         = `☑ %s; %s`
 	msgNoReminders            = `There is no registered reminder.`
-	msgNoClue                 = `There was no clue for the time in the message.`
+	msgNoClue                 = `There was no clue for the desired datetime in your message.`
 	msgPrivacy                = "Privacy Policy:\n\n" + githubPageURL + `/raw/master/PRIVACY.md`
 
-	systemInstruction = `You are a kind and considerate chat bot who reserves messages from the user and send them back at the user's desired times. Current time is %s.`
+	systemInstruction = `You are a kind and considerate chat bot which is built for understanding user's prompt, extracting desired datetime and promt from it, and sending the prompt at the exact datetime. Current datetime is '%s'.`
 
 	// function call
-	fnNameReserveMessage              = `reserve_message`
-	fnDescriptionReserveMessage       = `Reserve a message and send it back to the user at the desired datetime.`
-	fnArgNameReservedText             = `reserved_text`
-	fnArgDescriptionReservedText      = `The text of reserved message.`
-	fnArgNameScheduledDatetime        = `scheduled_datetime`
-	fnArgDescriptionScheduledDatetime = `A datetime when the message should be sent back in "yyyy.mm.dd hh:MM" format. When the hour/minute value is missing, fallback value is "%02d:00".`
+	fnNameInferDatetime               = `infer_datetime`
+	fnDescriptionInferDatetime        = `This function infers a datetime and user's prompt from the original prompt text and returns them.`
+	fnArgNameInferredPrompt           = `inferred_prompt`
+	fnArgDescriptionReservedText      = `Inferred prompt text extracted from the original prompt. If it cannot be inferred, use the original prompt.`
+	fnArgNameInferredDatetime         = `inferred_datetime`
+	fnArgDescriptionScheduledDatetime = `Inferred datetime which is formatted as 'yyyy.mm.dd hh:MM'(eg. 2024.12.25 15:00). If the time cannot be inferred, fallback to %02d:00.`
 
 	datetimeFormat = `2006.01.02 15:04` // yyyy.mm.dd hh:MM
 
@@ -88,8 +89,8 @@ const (
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	//defaultGenerativeModel = "gemini-1.5-flash-latest"
-	defaultGenerativeModel = "gemini-1.5-pro-latest"
+	//defaultGenerativeModel = "gemini-1.5-pro-latest"
+	defaultGenerativeModel = "gemini-1.5-flash-latest"
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
@@ -569,17 +570,17 @@ type parsedItem struct {
 func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 	return []*genai.FunctionDeclaration{
 		{
-			Name:        fnNameReserveMessage,
-			Description: fnDescriptionReserveMessage,
+			Name:        fnNameInferDatetime,
+			Description: fnDescriptionInferDatetime,
 			Parameters: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
-					fnArgNameReservedText: {
+					fnArgNameInferredPrompt: {
 						Type:        genai.TypeString,
 						Description: fnArgDescriptionReservedText,
 						Nullable:    false,
 					},
-					fnArgNameScheduledDatetime: {
+					fnArgNameInferredDatetime: {
 						Type:        genai.TypeString,
 						Description: fmt.Sprintf(fnArgDescriptionScheduledDatetime, conf.DefaultHour),
 						Nullable:    false,
@@ -597,9 +598,9 @@ func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err 
 
 	result = []parsedItem{}
 
-	if fn.Name == fnNameReserveMessage {
-		text := val[string](fn.Args, fnArgNameReservedText)
-		datetime := val[string](fn.Args, fnArgNameScheduledDatetime)
+	if fn.Name == fnNameInferDatetime {
+		text := val[string](fn.Args, fnArgNameInferredPrompt)
+		datetime := val[string](fn.Args, fnArgNameInferredDatetime)
 
 		if text != "" && datetime != "" {
 			if t, e := time.ParseInLocation(datetimeFormat, datetime, _location); e == nil {
@@ -609,10 +610,10 @@ func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err 
 					Generated: false,
 				})
 			} else {
-				err = fmt.Errorf("failed to parse datetime (%s) in function call: %s", e, prettify(fn.Args))
+				err = fmt.Errorf("failed to parse '%s' (%s) in function call: %s", fnArgNameInferredDatetime, e, prettify(fn.Args))
 			}
 		} else {
-			err = fmt.Errorf("invalid `text` or `datetime` in function call: %s", prettify(fn.Args))
+			err = fmt.Errorf("invalid `%s` and/or `%s` in function call: %s", fnArgNameInferredDatetime, fnArgNameInferredPrompt, prettify(fn.Args))
 		}
 	} else {
 		err = fmt.Errorf("no function declaration for name: %s", fn.Name)
@@ -670,10 +671,14 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	if strings.Contains(conf.GoogleGenerativeModel, "gemini-1.5-pro") {
 		model.ToolConfig = &genai.ToolConfig{
 			FunctionCallingConfig: &genai.FunctionCallingConfig{
-				Mode: genai.FunctionCallingAny,
-				AllowedFunctionNames: []string{
-					fnNameReserveMessage,
-				},
+				// FIXME: googleapi: Error 400: Function calling mode `ANY` is not enabled for api version v1beta
+				/*
+					Mode: genai.FunctionCallingAny,
+					AllowedFunctionNames: []string{
+						fnNameInferDatetime,
+					},
+				*/
+				Mode: genai.FunctionCallingAuto,
 			},
 		}
 	} else {
@@ -698,7 +703,7 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 		ctx,
 		genai.Text(text),
 	); err != nil {
-		errs = append(errs, fmt.Errorf("failed to generate text: %s", err))
+		errs = append(errs, fmt.Errorf("failed to generate text: %s", errorString(err)))
 
 		// log failure
 		var numTokens int32
@@ -707,7 +712,7 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 		}
 		savePromptAndResult(db, chatID, userID, username, text, int(numTokens), 0, false)
 
-		logError(db, "failed to generate text: %s", err)
+		logError(db, "failed to generate text: %s", errorString(err))
 	} else {
 		logDebug(conf, "[verbose] generated: %s", prettify(generated))
 
@@ -726,7 +731,7 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 							} else {
 								errs = append(errs, err)
 
-								logError(db, fmt.Sprintf("failed to handle function call: %s", err))
+								logError(db, "failed to handle function call: %s", err)
 							}
 							break
 						}
@@ -1125,4 +1130,14 @@ func datetimeButtonsForCallbackQuery(items []parsedItem, chatID int64, messageID
 // format given time to string
 func datetimeToStr(t time.Time) string {
 	return t.In(_location).Format(datetimeFormat)
+}
+
+// convert error to string
+func errorString(err error) (error string) {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
+		return fmt.Sprintf("googleapi error: %s", gerr.Body)
+	} else {
+		return err.Error()
+	}
 }
