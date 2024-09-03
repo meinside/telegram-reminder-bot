@@ -76,14 +76,14 @@ const (
 	systemInstruction = `You are a kind and considerate chat bot which is built for understanding user's prompt, extracting desired datetime and promt from it, and sending the prompt at the exact datetime. Current datetime is '%s'.`
 
 	// function call
-	fnNameInferDatetime               = `infer_datetime`
-	fnDescriptionInferDatetime        = `This function infers a datetime and user's prompt from the original prompt text and returns them.`
-	fnArgNameInferredPrompt           = `inferred_prompt`
-	fnArgDescriptionReservedText      = `Inferred prompt text extracted from the original prompt. If it cannot be inferred, use the original prompt.`
-	fnArgNameInferredDatetime         = `inferred_datetime`
-	fnArgDescriptionScheduledDatetime = `Inferred datetime which is formatted as 'yyyy.mm.dd hh:MM'(eg. 2024.12.25 15:00). If the time cannot be inferred, fallback to %02d:00.`
+	fnNameInferDatetime              = `infer_datetime`
+	fnDescriptionInferDatetime       = `This function infers a datetime and a message from the original prompt text.`
+	fnArgNameInferredDatetime        = `inferred_datetime`
+	fnArgDescriptionInferredDatetime = `Inferred datetime which is formatted as 'yyyy.mm.dd hh:MM TZ'(eg. 2024.12.25 15:00 KST). If the time cannot be inferred, fallback to %02d:00.`
+	fnArgNameMessageToSend           = `message_to_send`
+	fnArgDescriptionMessageToSend    = `Inferred message to be sent at 'inferred_datetime'. If it cannot be inferred, use the original prompt.`
 
-	datetimeFormat = `2006.01.02 15:04` // yyyy.mm.dd hh:MM
+	datetimeFormat = `2006.01.02 15:04 MST` // yyyy.mm.dd hh:MM TZ
 
 	// default configs
 	defaultMonitorIntervalSeconds  = 30
@@ -575,14 +575,14 @@ func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 			Parameters: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
-					fnArgNameInferredPrompt: {
-						Type:        genai.TypeString,
-						Description: fnArgDescriptionReservedText,
-						Nullable:    false,
-					},
 					fnArgNameInferredDatetime: {
 						Type:        genai.TypeString,
-						Description: fmt.Sprintf(fnArgDescriptionScheduledDatetime, conf.DefaultHour),
+						Description: fmt.Sprintf(fnArgDescriptionInferredDatetime, conf.DefaultHour),
+						Nullable:    false,
+					},
+					fnArgNameMessageToSend: {
+						Type:        genai.TypeString,
+						Description: fnArgDescriptionMessageToSend,
 						Nullable:    false,
 					},
 				},
@@ -599,13 +599,13 @@ func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err 
 	result = []parsedItem{}
 
 	if fn.Name == fnNameInferDatetime {
-		text := val[string](fn.Args, fnArgNameInferredPrompt)
 		datetime := val[string](fn.Args, fnArgNameInferredDatetime)
+		message := val[string](fn.Args, fnArgNameMessageToSend)
 
-		if text != "" && datetime != "" {
+		if message != "" && datetime != "" {
 			if t, e := time.ParseInLocation(datetimeFormat, datetime, _location); e == nil {
 				result = append(result, parsedItem{
-					Message:   text,
+					Message:   message,
 					When:      t,
 					Generated: false,
 				})
@@ -613,7 +613,7 @@ func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err 
 				err = fmt.Errorf("failed to parse '%s' (%s) in function call: %s", fnArgNameInferredDatetime, e, prettify(fn.Args))
 			}
 		} else {
-			err = fmt.Errorf("invalid `%s` and/or `%s` in function call: %s", fnArgNameInferredDatetime, fnArgNameInferredPrompt, prettify(fn.Args))
+			err = fmt.Errorf("invalid `%s` and/or `%s` in function call: %s", fnArgNameInferredDatetime, fnArgNameMessageToSend, prettify(fn.Args))
 		}
 	} else {
 		err = fmt.Errorf("no function declaration for name: %s", fn.Name)
