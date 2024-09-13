@@ -21,9 +21,9 @@ import (
 	// google ai
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/googleapi"
-	"google.golang.org/api/option"
 
 	// my libraries
+	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
 	"github.com/meinside/version-go"
 
@@ -232,12 +232,8 @@ func runBot(conf config) {
 
 	bot := tg.NewClient(*token)
 
+	// background context
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(*apiKey))
-	if err != nil {
-		logErrorAndDie(nil, "failed to create API client: %s", err)
-	}
-	defer client.Close()
 
 	// open database
 	var db *Database
@@ -265,7 +261,7 @@ func runBot(conf config) {
 				return
 			}
 
-			handleMessage(ctx, b, client, conf, db, update, message)
+			handleMessage(ctx, b, conf, db, update, message)
 		})
 
 		// set callback query handler
@@ -373,7 +369,7 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 }
 
 // handle allowed message update from telegram bot api
-func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, update tg.Update, message tg.Message) {
+func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, update tg.Update, message tg.Message) {
 	var msg string
 
 	chatID := message.Chat.ID
@@ -389,7 +385,7 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 
 		if message.HasText() {
 			txt := *message.Text
-			if parsed, errs := parse(ctx, client, conf, db, *message, txt); len(parsed) > 0 {
+			if parsed, errs := parse(ctx, conf, db, *message, txt); len(parsed) > 0 {
 				parsed = filterParsed(conf, parsed)
 
 				if len(parsed) == 1 {
@@ -649,7 +645,7 @@ func prettify(v any) string {
 }
 
 // parse given string, generate items from the parsed ones, and return them
-func parse(ctx context.Context, client *genai.Client, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
+func parse(ctx context.Context, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
 	result = []parsedItem{}
 	errs = []error{}
 
@@ -657,19 +653,28 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 	userID := message.From.ID
 	username := userName(message.From)
 
-	// model for generation
-	model := client.GenerativeModel(conf.GoogleGenerativeModel)
-	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh) // set safety settings
-	model.Tools = []*genai.Tool{                                   // set function declarations
-		{
-			FunctionDeclarations: fnDeclarations(conf),
+	// gemini things for generation
+	gtc := gt.NewClient(conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
+
+	// system instruction
+	gtc.SetSystemInstructionFunc(func() string {
+		return fmt.Sprintf(systemInstruction, datetimeToStr(time.Now()))
+	})
+
+	// options for generation
+	opts := &gt.GenerationOptions{
+		// set function declarations
+		Tools: []*genai.Tool{
+			{
+				FunctionDeclarations: fnDeclarations(conf),
+			},
 		},
 	}
 	// NOTE: `genai.FunctionCallingAny` is only available for `gemini-1.5-pro*`
 	//
 	// https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling
 	if strings.Contains(conf.GoogleGenerativeModel, "gemini-1.5-pro") {
-		model.ToolConfig = &genai.ToolConfig{
+		opts.ToolConfig = &genai.ToolConfig{
 			FunctionCallingConfig: &genai.FunctionCallingConfig{
 				// FIXME: googleapi: Error 400: Function calling mode `ANY` is not enabled for api version v1beta
 				/*
@@ -682,39 +687,25 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 			},
 		}
 	} else {
-		model.ToolConfig = &genai.ToolConfig{
+		opts.ToolConfig = &genai.ToolConfig{
 			FunctionCallingConfig: &genai.FunctionCallingConfig{
 				Mode: genai.FunctionCallingAuto,
 			},
 		}
 	}
 
-	// system instruction
-	now := datetimeToStr(time.Now())
-	model.SystemInstruction = &genai.Content{
-		Role: "model",
-		Parts: []genai.Part{
-			genai.Text(fmt.Sprintf(systemInstruction, now)),
-		},
-	}
-
 	// generate text
-	if generated, err := model.GenerateContent(
+	var numTokensInput, numTokensOutput int32
+	if generated, err := gtc.Generate(
 		ctx,
-		genai.Text(text),
-	); err != nil {
-		errs = append(errs, fmt.Errorf("failed to generate text: %s", errorString(err)))
-
-		// log failure
-		var numTokens int32
-		if counted, err := model.CountTokens(ctx, genai.Text(text)); err == nil {
-			numTokens = counted.TotalTokens
-		}
-		savePromptAndResult(db, chatID, userID, username, text, int(numTokens), 0, false)
-
-		logError(db, "failed to generate text: %s", errorString(err))
-	} else {
+		text,
+		nil,
+		opts,
+	); err == nil {
 		logDebug(conf, "[verbose] generated: %s", prettify(generated))
+
+		// token counts
+		numTokensInput, numTokensOutput = generated.UsageMetadata.PromptTokenCount, generated.UsageMetadata.CandidatesTokenCount
 
 		if len(generated.Candidates) <= 0 {
 			logError(db, "there was no returned candidate")
@@ -749,15 +740,18 @@ func parse(ctx context.Context, client *genai.Client, conf config, db *Database,
 				logError(db, "there was no usable function call in the returned parts")
 			}
 		}
+	} else {
+		errs = append(errs, fmt.Errorf("failed to generate text: %s", errorString(err)))
+
+		// log failure
+		savePromptAndResult(db, chatID, userID, username, text, int(numTokensInput), int(numTokensOutput), false)
+
+		logError(db, "failed to generate text: %s", errorString(err))
 	}
 
 	// log success
 	if len(errs) <= 0 {
-		var numTokens int32
-		if counted, err := model.CountTokens(ctx, genai.Text(text)); err == nil {
-			numTokens = counted.TotalTokens
-		}
-		savePromptAndResult(db, chatID, userID, username, text, int(numTokens), 0, true)
+		savePromptAndResult(db, chatID, userID, username, text, int(numTokensInput), int(numTokensOutput), true)
 	}
 
 	return result, errs
@@ -813,35 +807,6 @@ func filterParsed(conf config, parsed []parsedItem) (filtered []parsedItem) {
 	}
 
 	return filtered
-}
-
-// generate safety settings for all supported harm categories
-func safetySettings(threshold genai.HarmBlockThreshold) (settings []*genai.SafetySetting) {
-	for _, category := range []genai.HarmCategory{
-		/*
-			// categories for PaLM 2 (Legacy) models
-			genai.HarmCategoryUnspecified,
-			genai.HarmCategoryDerogatory,
-			genai.HarmCategoryToxicity,
-			genai.HarmCategoryViolence,
-			genai.HarmCategorySexual,
-			genai.HarmCategoryMedical,
-			genai.HarmCategoryDangerous,
-		*/
-
-		// all categories supported by Gemini models
-		genai.HarmCategoryHarassment,
-		genai.HarmCategoryHateSpeech,
-		genai.HarmCategorySexuallyExplicit,
-		genai.HarmCategoryDangerousContent,
-	} {
-		settings = append(settings, &genai.SafetySetting{
-			Category:  category,
-			Threshold: threshold,
-		})
-	}
-
-	return settings
 }
 
 // generate user's name
