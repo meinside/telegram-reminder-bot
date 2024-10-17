@@ -230,7 +230,18 @@ func runBot(conf config) {
 		logErrorAndDie(nil, "`telegram_bot_token` and/or `google_ai_api_key` missing")
 	}
 
+	// telegram bot client
 	bot := tg.NewClient(*token)
+
+	// gemini things client
+	gtc, err := gt.NewClient(conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
+	if err != nil {
+		logErrorAndDie(nil, "error initializing gemini-things client: %s", err)
+	}
+	defer gtc.Close()
+	gtc.SetSystemInstructionFunc(func() string {
+		return fmt.Sprintf(systemInstruction, datetimeToStr(time.Now()))
+	})
 
 	// background context
 	ctx := context.Background()
@@ -261,7 +272,7 @@ func runBot(conf config) {
 				return
 			}
 
-			handleMessage(ctx, b, conf, db, update, message)
+			handleMessage(ctx, b, conf, db, gtc, update, message)
 		})
 
 		// set callback query handler
@@ -369,7 +380,7 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 }
 
 // handle allowed message update from telegram bot api
-func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, update tg.Update, message tg.Message) {
+func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt.Client, update tg.Update, message tg.Message) {
 	var msg string
 
 	chatID := message.Chat.ID
@@ -385,7 +396,7 @@ func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, 
 
 		if message.HasText() {
 			txt := *message.Text
-			if parsed, errs := parse(ctx, conf, db, *message, txt); len(parsed) > 0 {
+			if parsed, errs := parse(ctx, conf, db, gtc, *message, txt); len(parsed) > 0 {
 				parsed = filterParsed(conf, parsed)
 
 				if len(parsed) == 1 {
@@ -645,21 +656,13 @@ func prettify(v any) string {
 }
 
 // parse given string, generate items from the parsed ones, and return them
-func parse(ctx context.Context, conf config, db *Database, message tg.Message, text string) (result []parsedItem, errs []error) {
+func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, message tg.Message, text string) (result []parsedItem, errs []error) {
 	result = []parsedItem{}
 	errs = []error{}
 
 	chatID := message.Chat.ID
 	userID := message.From.ID
 	username := userName(message.From)
-
-	// gemini things for generation
-	gtc := gt.NewClient(conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
-
-	// system instruction
-	gtc.SetSystemInstructionFunc(func() string {
-		return fmt.Sprintf(systemInstruction, datetimeToStr(time.Now()))
-	})
 
 	// options for generation
 	opts := &gt.GenerationOptions{
