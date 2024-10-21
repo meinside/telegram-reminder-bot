@@ -138,7 +138,7 @@ func loadConfig(fpath string) (conf config, err error) {
 				if (conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil) &&
 					conf.Infisical != nil {
 					// read token and api key from infisical
-					client := infisical.NewInfisicalClient(infisical.Config{
+					client := infisical.NewInfisicalClient(context.TODO(), infisical.Config{
 						SiteUrl: "https://app.infisical.com",
 					})
 
