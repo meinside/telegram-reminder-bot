@@ -73,7 +73,7 @@ const (
 	msgNoClue                 = `There was no clue for the desired datetime in your message.`
 	msgPrivacy                = "Privacy Policy:\n\n" + githubPageURL + `/raw/master/PRIVACY.md`
 
-	systemInstruction = `You are a kind and considerate chat bot which is built for understanding user's prompt, extracting desired datetime and promt from it, and sending the prompt at the exact datetime. Current datetime is '%s'.`
+	systemInstruction = `You are a kind and considerate chat bot which is built for understanding user's prompt, extracting desired datetime and prompt from it, and sending the prompt at the exact datetime. Current datetime is '%s'.`
 
 	// function call
 	fnNameInferDatetime              = `infer_datetime`
@@ -89,8 +89,7 @@ const (
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	//defaultGenerativeModel = "gemini-1.5-pro-latest"
-	defaultGenerativeModel = "gemini-1.5-flash-latest"
+	defaultGenerativeModel         = "gemini-1.5-flash-latest"
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
@@ -672,29 +671,16 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 				FunctionDeclarations: fnDeclarations(conf),
 			},
 		},
-	}
-	// NOTE: `genai.FunctionCallingAny` is only available for `gemini-1.5-pro*`
-	//
-	// https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling
-	if strings.Contains(conf.GoogleGenerativeModel, "gemini-1.5-pro") {
-		opts.ToolConfig = &genai.ToolConfig{
+		// function call config
+		ToolConfig: &genai.ToolConfig{
+			// https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling
 			FunctionCallingConfig: &genai.FunctionCallingConfig{
-				// FIXME: googleapi: Error 400: Function calling mode `ANY` is not enabled for api version v1beta
-				/*
-					Mode: genai.FunctionCallingAny,
-					AllowedFunctionNames: []string{
-						fnNameInferDatetime,
-					},
-				*/
-				Mode: genai.FunctionCallingAuto,
+				Mode: genai.FunctionCallingAny,
+				AllowedFunctionNames: []string{
+					fnNameInferDatetime,
+				},
 			},
-		}
-	} else {
-		opts.ToolConfig = &genai.ToolConfig{
-			FunctionCallingConfig: &genai.FunctionCallingConfig{
-				Mode: genai.FunctionCallingAuto,
-			},
-		}
+		},
 	}
 
 	// generate text
