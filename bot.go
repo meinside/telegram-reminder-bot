@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,8 @@ import (
 	"github.com/infisical/go-sdk/packages/models"
 
 	// google ai
-	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/genai"
 
 	// my libraries
 	gt "github.com/meinside/gemini-things-go"
@@ -325,13 +326,7 @@ func isAllowed(conf config, update tg.Update) bool {
 		username = *update.CallbackQuery.From.Username
 	}
 
-	for _, allowedUser := range conf.AllowedTelegramUsers {
-		if allowedUser == username {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(conf.AllowedTelegramUsers, username)
 }
 
 // poll queue items periodically
@@ -592,6 +587,10 @@ func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 						Nullable:    false,
 					},
 				},
+				Required: []string{
+					fnArgNameInferredDatetime,
+					fnArgNameMessageToSend,
+				},
 				Nullable: false,
 			},
 		},
@@ -675,7 +674,7 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 		ToolConfig: &genai.ToolConfig{
 			// https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling
 			FunctionCallingConfig: &genai.FunctionCallingConfig{
-				Mode: genai.FunctionCallingAny,
+				Mode: genai.FunctionCallingConfigModeAny,
 				AllowedFunctionNames: []string{
 					fnNameInferDatetime,
 				},
@@ -687,14 +686,20 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 	var numTokensInput, numTokensOutput int32
 	if generated, err := gtc.Generate(
 		ctx,
-		text,
-		nil,
+		[]gt.Prompt{gt.NewTextPrompt(text)},
 		opts,
 	); err == nil {
 		logDebug(conf, "[verbose] generated: %s", prettify(generated))
 
 		// token counts
-		numTokensInput, numTokensOutput = generated.UsageMetadata.PromptTokenCount, generated.UsageMetadata.CandidatesTokenCount
+		if generated.UsageMetadata != nil {
+			if generated.UsageMetadata.PromptTokenCount != nil {
+				numTokensInput = *generated.UsageMetadata.PromptTokenCount
+			}
+			if generated.UsageMetadata.CandidatesTokenCount != nil {
+				numTokensOutput = *generated.UsageMetadata.CandidatesTokenCount
+			}
+		}
 
 		if len(generated.Candidates) <= 0 {
 			logError(db, "there was no returned candidate")
@@ -704,8 +709,8 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 
 				if len(content.Parts) > 0 {
 					for _, part := range content.Parts {
-						if fnCall, ok := part.(genai.FunctionCall); ok { // if it is a function call,
-							if handled, err := handleFnCall(conf, fnCall); err == nil {
+						if part.FunctionCall != nil { // if it is a function call,
+							if handled, err := handleFnCall(conf, *part.FunctionCall); err == nil {
 								// append result
 								result = append(result, handled...)
 							} else {
@@ -1012,8 +1017,10 @@ func noSuchCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 	}
 }
 
-var _stdout = log.New(os.Stdout, "", log.LstdFlags)
-var _stderr = log.New(os.Stderr, "", log.LstdFlags)
+var (
+	_stdout = log.New(os.Stdout, "", log.LstdFlags)
+	_stderr = log.New(os.Stderr, "", log.LstdFlags)
+)
 
 // log info message
 func logInfo(format string, a ...any) {
