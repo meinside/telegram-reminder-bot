@@ -686,7 +686,9 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 	var numTokensInput, numTokensOutput int32
 	if generated, err := gtc.Generate(
 		ctx,
-		[]gt.Prompt{gt.NewTextPrompt(text)},
+		[]gt.Prompt{
+			gt.PromptFromText(text),
+		},
 		opts,
 	); err == nil {
 		logDebug(conf, "[verbose] generated: %s", prettify(generated))
