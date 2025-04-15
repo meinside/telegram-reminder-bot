@@ -695,11 +695,11 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 
 		// token counts
 		if generated.UsageMetadata != nil {
-			if generated.UsageMetadata.PromptTokenCount != nil {
-				numTokensInput = *generated.UsageMetadata.PromptTokenCount
+			if generated.UsageMetadata.PromptTokenCount != 0 {
+				numTokensInput = generated.UsageMetadata.PromptTokenCount
 			}
-			if generated.UsageMetadata.CandidatesTokenCount != nil {
-				numTokensOutput = *generated.UsageMetadata.CandidatesTokenCount
+			if generated.UsageMetadata.CandidatesTokenCount != 0 {
+				numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
 			}
 		}
 
