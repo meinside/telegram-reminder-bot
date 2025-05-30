@@ -1,35 +1,19 @@
-package main
-
 // bot.go
+
+package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	// infisical
-	infisical "github.com/infisical/go-sdk"
-	"github.com/infisical/go-sdk/packages/models"
-
-	// google ai
-	"google.golang.org/api/googleapi"
-	"google.golang.org/genai"
-
-	// my libraries
 	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
-	"github.com/meinside/version-go"
-
-	// others
-	"github.com/tailscale/hujson"
 )
 
 const (
@@ -90,132 +74,12 @@ const (
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	defaultGenerativeModel         = "gemini-1.5-flash-latest"
+	defaultGenerativeModel         = "gemini-2.0-flash"
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
 
 var _location *time.Location
-
-// config struct for loading a configuration file
-type config struct {
-	GoogleGenerativeModel string `json:"google_generative_model,omitempty"`
-
-	MonitorIntervalSeconds  int    `json:"monitor_interval_seconds"`
-	TelegramIntervalSeconds int    `json:"telegram_interval_seconds"`
-	MaxNumTries             int    `json:"max_num_tries"`
-	DBFilepath              string `json:"db_filepath"`
-
-	// other optional configurations
-	AllowedTelegramUsers []string `json:"allowed_telegram_users"`
-	DefaultHour          int      `json:"default_hour,omitempty"`
-	Verbose              bool     `json:"verbose,omitempty"`
-
-	// token and api key
-	TelegramBotToken *string `json:"telegram_bot_token,omitempty"`
-	GoogleAIAPIKey   *string `json:"google_ai_api_key,omitempty"`
-
-	// or Infisical settings
-	Infisical *struct {
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret"`
-
-		ProjectID   string `json:"project_id"`
-		Environment string `json:"environment"`
-		SecretType  string `json:"secret_type"`
-
-		TelegramBotTokenKeyPath string `json:"telegram_bot_token_key_path"`
-		GoogleAIAPIKeyKeyPath   string `json:"google_ai_api_key_key_path"`
-	} `json:"infisical,omitempty"`
-}
-
-// load config at given path
-func loadConfig(fpath string) (conf config, err error) {
-	var bytes []byte
-	if bytes, err = os.ReadFile(fpath); err == nil {
-		if bytes, err = standardizeJSON(bytes); err == nil {
-			if err = json.Unmarshal(bytes, &conf); err == nil {
-				if (conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil) &&
-					conf.Infisical != nil {
-					// read token and api key from infisical
-					client := infisical.NewInfisicalClient(context.TODO(), infisical.Config{
-						SiteUrl: "https://app.infisical.com",
-					})
-
-					_, err = client.Auth().UniversalAuthLogin(conf.Infisical.ClientID, conf.Infisical.ClientSecret)
-					if err != nil {
-						return config{}, fmt.Errorf("failed to authenticate with Infisical: %s", err)
-					}
-
-					var keyPath string
-					var secret models.Secret
-
-					// telegram bot token
-					keyPath = conf.Infisical.TelegramBotTokenKeyPath
-					secret, err = client.Secrets().Retrieve(infisical.RetrieveSecretOptions{
-						ProjectID:   conf.Infisical.ProjectID,
-						Type:        conf.Infisical.SecretType,
-						Environment: conf.Infisical.Environment,
-						SecretPath:  path.Dir(keyPath),
-						SecretKey:   path.Base(keyPath),
-					})
-					if err == nil {
-						val := secret.SecretValue
-						conf.TelegramBotToken = &val
-					} else {
-						return config{}, fmt.Errorf("failed to retrieve `telegram_bot_token` from Infisical: %s", err)
-					}
-
-					// google ai api key
-					keyPath = conf.Infisical.GoogleAIAPIKeyKeyPath
-					secret, err = client.Secrets().Retrieve(infisical.RetrieveSecretOptions{
-						ProjectID:   conf.Infisical.ProjectID,
-						Type:        conf.Infisical.SecretType,
-						Environment: conf.Infisical.Environment,
-						SecretPath:  path.Dir(keyPath),
-						SecretKey:   path.Base(keyPath),
-					})
-					if err == nil {
-						val := secret.SecretValue
-						conf.GoogleAIAPIKey = &val
-					} else {
-						return config{}, fmt.Errorf("failed to retrieve `google_ai_api_key` from Infisical: %s", err)
-					}
-				}
-
-				// set default/fallback values
-				if conf.MonitorIntervalSeconds <= 0 {
-					conf.MonitorIntervalSeconds = defaultMonitorIntervalSeconds
-				}
-				if conf.TelegramIntervalSeconds <= 0 {
-					conf.TelegramIntervalSeconds = defaultTelegramIntervalSeconds
-				}
-				if conf.MaxNumTries <= 0 {
-					conf.MaxNumTries = defaultMaxNumTries
-				}
-				if conf.GoogleGenerativeModel == "" {
-					conf.GoogleGenerativeModel = defaultGenerativeModel
-				}
-				if conf.DefaultHour < 0 || conf.DefaultHour >= 24 {
-					conf.DefaultHour = 0
-				}
-			}
-		}
-	}
-
-	return conf, err
-}
-
-// standardize given JSON (JWCC) bytes
-func standardizeJSON(b []byte) ([]byte, error) {
-	ast, err := hujson.Parse(b)
-	if err != nil {
-		return b, err
-	}
-	ast.Standardize()
-
-	return ast.Pack(), nil
-}
 
 // launch bot with given parameters
 func runBot(conf config) {
@@ -402,15 +266,20 @@ func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, 
 
 					if _, err := db.Enqueue(chatID, message.MessageID, what, when); err == nil {
 						msg = fmt.Sprintf(msgResponseFormat,
-							what,
+							what, // NOTE: not shorten it
 							datetimeToStr(when),
 						)
 					} else {
-						msg = fmt.Sprintf(msgSaveFailedFormat, what, err)
+						msg = fmt.Sprintf(msgSaveFailedFormat,
+							shorten(what, 100), // NOTE: shorten it
+							err,
+						)
 					}
 				} else if len(parsed) > 0 {
 					if _, err := db.SaveTemporaryMessage(chatID, message.MessageID, parsed[0].Message); err == nil {
-						msg = fmt.Sprintf(msgSelectWhat, parsed[0].Message)
+						msg = fmt.Sprintf(msgSelectWhat,
+							parsed[0].Message, // NOTE: not shorten it
+						)
 
 						// options for inline keyboards
 						options.SetReplyMarkup(tg.NewInlineKeyboardMarkup(
@@ -423,7 +292,9 @@ func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, 
 					msg = msgNoClue
 				}
 			} else {
-				msg = fmt.Sprintf(msgParseFailedFormat, errors.Join(errs...))
+				msg = fmt.Sprintf(msgParseFailedFormat,
+					errors.Join(errs...),
+				)
 			}
 		} else {
 			logInfo("no text in usable message from update.")
@@ -461,7 +332,9 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 			if queueID, err := strconv.Atoi(cancelParam); err == nil {
 				if item, err := db.GetQueueItem(query.Message.Chat.ID, int64(queueID)); err == nil {
 					if _, err := db.DeleteQueueItem(query.Message.Chat.ID, int64(queueID)); err == nil {
-						msg = fmt.Sprintf(msgReminderCanceledFormat, item.Message)
+						msg = fmt.Sprintf(msgReminderCanceledFormat,
+							item.Message, // NOTE: not shorten it
+						)
 					} else {
 						logError(db, "failed to delete reminder: %s", err)
 					}
@@ -482,7 +355,7 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 						if when, err := time.ParseInLocation(datetimeFormat, params[2], _location); err == nil {
 							if _, err := db.Enqueue(chatID, messageID, saved.Message, when); err == nil {
 								msg = fmt.Sprintf(msgResponseFormat,
-									saved.Message,
+									shorten(saved.Message, 160), // NOTE: shorten it
 									datetimeToStr(when),
 								)
 
@@ -491,7 +364,10 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 									logError(db, "failed to delete temporary message: %s", err)
 								}
 							} else {
-								msg = fmt.Sprintf(msgSaveFailedFormat, saved.Message, err)
+								msg = fmt.Sprintf(msgSaveFailedFormat,
+									shorten(saved.Message, 160), // NOTE: shorten it
+									err,
+								)
 							}
 						} else {
 							logError(db, "failed to parse time: %s", err)
@@ -525,25 +401,8 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 			logError(db, "failed to edit message text: %s", *apiResult.Description)
 		}
 	} else {
-		logError(db, "failed to answer callback query: %s", prettify(query))
+		logError(db, "failed to answer callback query with %s: %s", prettify(query), *apiResult.Description)
 	}
-}
-
-// get usable message from given update
-func messageFromUpdate(update tg.Update) (message *tg.Message) {
-	if update.HasMessage() && update.Message.HasText() {
-		message = update.Message
-	} else if update.HasMessage() && update.Message.HasDocument() {
-		message = update.Message
-	} else if update.HasEditedMessage() && update.EditedMessage.HasText() {
-		message = update.EditedMessage
-	}
-
-	if message == nil {
-		logInfo("no usable message from update.")
-	}
-
-	return message
 }
 
 // send given message to the chat
@@ -561,295 +420,6 @@ func send(bot *tg.Bot, conf config, db *Database, message string, chatID int64, 
 	if res := bot.SendMessage(chatID, message, options); !res.Ok {
 		logError(db, "failed to send message: %s", *res.Description)
 	}
-}
-
-// type for parsed items
-type parsedItem struct {
-	Message   string
-	When      time.Time
-	Generated bool // if this item was generated by the bot (due to vague request)
-}
-
-// function declarations for genai model
-func fnDeclarations(conf config) []*genai.FunctionDeclaration {
-	return []*genai.FunctionDeclaration{
-		{
-			Name:        fnNameInferDatetime,
-			Description: fnDescriptionInferDatetime,
-			Parameters: &genai.Schema{
-				Type: genai.TypeObject,
-				Properties: map[string]*genai.Schema{
-					fnArgNameInferredDatetime: {
-						Type:        genai.TypeString,
-						Description: fmt.Sprintf(fnArgDescriptionInferredDatetime, conf.DefaultHour),
-						Nullable:    ptr(false),
-					},
-					fnArgNameMessageToSend: {
-						Type:        genai.TypeString,
-						Description: fnArgDescriptionMessageToSend,
-						Nullable:    ptr(false),
-					},
-				},
-				Required: []string{
-					fnArgNameInferredDatetime,
-					fnArgNameMessageToSend,
-				},
-				Nullable: ptr(false),
-			},
-		},
-	}
-}
-
-// handle function call
-func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err error) {
-	logDebug(conf, "[verbose] handling function call: %s", prettify(fn))
-
-	result = []parsedItem{}
-
-	if fn.Name == fnNameInferDatetime {
-		datetime := val[string](fn.Args, fnArgNameInferredDatetime)
-		message := val[string](fn.Args, fnArgNameMessageToSend)
-
-		if message != "" && datetime != "" {
-			if t, e := time.ParseInLocation(datetimeFormat, datetime, _location); e == nil {
-				result = append(result, parsedItem{
-					Message:   message,
-					When:      t,
-					Generated: false,
-				})
-			} else {
-				err = fmt.Errorf("failed to parse '%s' (%s) in function call: %s", fnArgNameInferredDatetime, e, prettify(fn.Args))
-			}
-		} else {
-			err = fmt.Errorf("invalid `%s` and/or `%s` in function call: %s", fnArgNameInferredDatetime, fnArgNameMessageToSend, prettify(fn.Args))
-		}
-	} else {
-		err = fmt.Errorf("no function declaration for name: %s", fn.Name)
-	}
-
-	if err != nil {
-		logDebug(conf, "[verbose] there was an error with returned function call: %s", err)
-	}
-
-	return result, err
-}
-
-// get value for given `key` from `m`, return the zero value if it has no such key
-func val[T any](m map[string]any, key string) T {
-	var r T
-
-	if v, exists := m[key]; exists {
-		if v, ok := v.(T); ok {
-			r = v
-		}
-	}
-
-	return r
-}
-
-// prettify given value in indented JSON format (for debugging purporse)
-func prettify(v any) string {
-	if bytes, err := json.MarshalIndent(v, "", "  "); err == nil {
-		return string(bytes)
-	}
-
-	return fmt.Sprintf("%+v", v)
-}
-
-// parse given string, generate items from the parsed ones, and return them
-func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, message tg.Message, text string) (result []parsedItem, errs []error) {
-	result = []parsedItem{}
-	errs = []error{}
-
-	chatID := message.Chat.ID
-	userID := message.From.ID
-	username := userName(message.From)
-
-	// options for generation
-	opts := &gt.GenerationOptions{
-		// set function declarations
-		Tools: []*genai.Tool{
-			{
-				FunctionDeclarations: fnDeclarations(conf),
-			},
-		},
-		// function call config
-		ToolConfig: &genai.ToolConfig{
-			// https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling
-			FunctionCallingConfig: &genai.FunctionCallingConfig{
-				Mode: genai.FunctionCallingConfigModeAny,
-				AllowedFunctionNames: []string{
-					fnNameInferDatetime,
-				},
-			},
-		},
-	}
-
-	// generate text
-	var numTokensInput, numTokensOutput int32
-	if generated, err := gtc.Generate(
-		ctx,
-		[]gt.Prompt{
-			gt.PromptFromText(text),
-		},
-		opts,
-	); err == nil {
-		logDebug(conf, "[verbose] generated: %s", prettify(generated))
-
-		// token counts
-		if generated.UsageMetadata != nil {
-			if generated.UsageMetadata.PromptTokenCount != 0 {
-				numTokensInput = generated.UsageMetadata.PromptTokenCount
-			}
-			if generated.UsageMetadata.CandidatesTokenCount != 0 {
-				numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
-			}
-		}
-
-		if len(generated.Candidates) <= 0 {
-			logError(db, "there was no returned candidate")
-		} else {
-			for _, candidate := range generated.Candidates {
-				content := candidate.Content
-
-				if len(content.Parts) > 0 {
-					for _, part := range content.Parts {
-						if part.FunctionCall != nil { // if it is a function call,
-							if handled, err := handleFnCall(conf, *part.FunctionCall); err == nil {
-								// append result
-								result = append(result, handled...)
-							} else {
-								errs = append(errs, err)
-
-								logError(db, "failed to handle function call: %s", err)
-							}
-							break
-						}
-					}
-				} else {
-					errs = append(errs, fmt.Errorf("no part in content"))
-
-					logError(db, "there was no part in the returned content")
-				}
-			}
-
-			if len(result) <= 0 {
-				errs = append(errs, fmt.Errorf("no function call in parts"))
-
-				logError(db, "there was no usable function call in the returned parts")
-			}
-		}
-	} else {
-		errs = append(errs, fmt.Errorf("failed to generate text: %s", errorString(err)))
-
-		// log failure
-		savePromptAndResult(db, chatID, userID, username, text, int(numTokensInput), int(numTokensOutput), false)
-
-		logError(db, "failed to generate text: %s", errorString(err))
-	}
-
-	// log success
-	if len(errs) <= 0 {
-		savePromptAndResult(db, chatID, userID, username, text, int(numTokensInput), int(numTokensOutput), true)
-	}
-
-	return result, errs
-}
-
-// filter parsed items to be all valid
-func filterParsed(conf config, parsed []parsedItem) (filtered []parsedItem) {
-	// add some generated items for convenience
-	generated := []parsedItem{}
-	for _, p := range parsed {
-		// save it as it is,
-		generated = append(generated, p)
-
-		// and add generated ones,
-		when := p.When.In(_location)
-		hour, minute := when.Hour(), when.Minute()
-		if hour == 0 && minute == 0 {
-			// default hour
-			generated = append(generated, parsedItem{
-				Message:   p.Message,
-				When:      p.When.In(_location).Add(time.Hour * time.Duration(conf.DefaultHour)),
-				Generated: true,
-			})
-		} else if hour < 12 {
-			// add 12 hours if it is AM
-			generated = append(generated, parsedItem{
-				Message:   p.Message,
-				When:      p.When.In(_location).Add(time.Hour * 12),
-				Generated: true,
-			})
-		}
-	}
-
-	// remove already-passed or duplicated ones
-	filtered = []parsedItem{}
-	duplicated := map[string]bool{}
-	now := time.Now()
-	for _, p := range generated {
-		when := p.When.In(_location)
-
-		// remove duplicated ones,
-		dup := when.Format(datetimeFormat)
-		if _, exists := duplicated[dup]; exists {
-			continue
-		} else {
-			duplicated[dup] = true // mark as duplicated,
-
-			// and remove already-passed ones
-			if when.After(now) {
-				filtered = append(filtered, p)
-			}
-		}
-	}
-
-	return filtered
-}
-
-// generate user's name
-func userName(user *tg.User) string {
-	if user.Username != nil {
-		return fmt.Sprintf("@%s (%s)", *user.Username, user.FirstName)
-	} else {
-		return user.FirstName
-	}
-}
-
-// generate user's name from update
-func userNameFromUpdate(update tg.Update) string {
-	if user := update.GetFrom(); user != nil {
-		return userName(user)
-	}
-
-	logInfo("there was no `from` in `update`")
-
-	return "unknown"
-}
-
-// save prompt and its result to logs database
-func savePromptAndResult(db *Database, chatID, userID int64, username string, prompt string, promptTokens int, resultTokens int, resultSuccessful bool) {
-	if db != nil {
-		if err := db.SavePrompt(Prompt{
-			ChatID:   chatID,
-			UserID:   userID,
-			Username: username,
-			Text:     prompt,
-			Tokens:   promptTokens,
-			Result: ParsedItem{
-				Successful: resultSuccessful,
-				Tokens:     resultTokens,
-			},
-		}); err != nil {
-			log.Printf("failed to save prompt & result to database: %s", err)
-		}
-	}
-}
-
-// generate a help message with version info
-func helpMessage(conf config) string {
-	return fmt.Sprintf(msgHelp, conf.GoogleGenerativeModel, version.Build(version.OS|version.Architecture|version.Revision), githubPageURL)
 }
 
 // return a /start command handler
@@ -884,7 +454,10 @@ func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, upda
 				if len(reminders) > 0 {
 					format := fmt.Sprintf("%s\n", msgListItemFormat)
 					for _, r := range reminders {
-						msg += fmt.Sprintf(format, datetimeToStr(r.FireOn), r.Message)
+						msg += fmt.Sprintf(format,
+							datetimeToStr(r.FireOn),
+							shorten(r.Message, 100), // NOTE: shorten it
+						)
 					}
 				} else {
 					msg = msgNoReminders
@@ -921,7 +494,10 @@ func cancelCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 					// inline keyboards
 					keys := make(map[string]string)
 					for _, r := range reminders {
-						keys[fmt.Sprintf(msgListItemFormat, datetimeToStr(r.FireOn), r.Message)] = fmt.Sprintf("%s %d", cmdCancel, r.ID)
+						keys[fmt.Sprintf(msgListItemFormat,
+							datetimeToStr(r.FireOn),
+							shorten(r.Message, 100), // NOTE: shorten it
+						)] = fmt.Sprintf("%s %d", cmdCancel, r.ID)
 					}
 					buttons := tg.NewInlineKeyboardButtonsAsRowsWithCallbackData(keys)
 
@@ -1020,95 +596,4 @@ func noSuchCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 			send(b, conf, db, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 		}
 	}
-}
-
-var (
-	_stdout = log.New(os.Stdout, "", log.LstdFlags)
-	_stderr = log.New(os.Stderr, "", log.LstdFlags)
-)
-
-// log info message
-func logInfo(format string, a ...any) {
-	_stdout.Printf(format, a...)
-}
-
-// log debug message (printed to stdout only when `IsVerbose` is true)
-func logDebug(conf config, format string, a ...any) {
-	if conf.Verbose {
-		_stdout.Printf(format, a...)
-	}
-}
-
-// log error message
-func logError(db *Database, format string, a ...any) {
-	if db != nil {
-		db.LogError(format, a...)
-	}
-
-	_stderr.Printf(format, a...)
-}
-
-// log error message and exit(1)
-func logErrorAndDie(db *Database, format string, a ...any) {
-	if db != nil {
-		db.LogError(format, a...)
-	}
-
-	_stderr.Fatalf(format, a...)
-}
-
-// default reply markup
-func defaultReplyMarkup() tg.ReplyKeyboardMarkup {
-	return tg.NewReplyKeyboardMarkup( // show keyboards
-		[][]tg.KeyboardButton{
-			tg.NewKeyboardButtons(cmdListReminders, cmdCancel, cmdStats),
-			tg.NewKeyboardButtons(cmdPrivacy, cmdHelp),
-		}).
-		SetResizeKeyboard(true)
-}
-
-// generate inline keyboard buttons for multiple datetimes
-func datetimeButtonsForCallbackQuery(items []parsedItem, chatID int64, messageID int64) [][]tg.InlineKeyboardButton {
-	// datetime buttons
-	keys := make(map[string]string)
-
-	var title, generated string
-	for _, item := range items {
-		if item.Generated {
-			generated = " *"
-		} else {
-			generated = ""
-		}
-		title = fmt.Sprintf("%s%s", datetimeToStr(item.When), generated)
-		keys[title] = fmt.Sprintf("%s %d/%d/%s", cmdLoad, chatID, messageID, datetimeToStr(item.When))
-	}
-	buttons := tg.NewInlineKeyboardButtonsAsRowsWithCallbackData(keys)
-
-	// add cancel button
-	buttons = append(buttons, []tg.InlineKeyboardButton{
-		tg.NewInlineKeyboardButton(msgCancel).
-			SetCallbackData(cmdCancel),
-	})
-
-	return buttons
-}
-
-// format given time to string
-func datetimeToStr(t time.Time) string {
-	return t.In(_location).Format(datetimeFormat)
-}
-
-// convert error to string
-func errorString(err error) (error string) {
-	var gerr *googleapi.Error
-	if errors.As(err, &gerr) {
-		return fmt.Sprintf("googleapi error: %s", gerr.Body)
-	} else {
-		return err.Error()
-	}
-}
-
-// return a pointer to given value
-func ptr[T any](t T) *T {
-	return &t
 }

@@ -34,7 +34,7 @@ and set your values:
 
 ```json
 {
-  "google_generative_model": "gemini-1.5-flash-latest",
+  "google_generative_model": "gemini-2.0-flash",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": "/path/to/reminder-db.sqlite",
@@ -52,7 +52,7 @@ You can use [Infisical](https://infisical.com/) for retrieving your bot token an
 
 ```json
 {
-  "google_generative_model": "gemini-1.5-flash-latest",
+  "google_generative_model": "gemini-2.0-flash",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,

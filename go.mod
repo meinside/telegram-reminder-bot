@@ -3,7 +3,7 @@ module github.com/meinside/telegram-reminder-bot
 go 1.24.1
 
 require (
-	github.com/infisical/go-sdk v0.5.92
+	github.com/infisical/go-sdk v0.5.93
 	github.com/meinside/gemini-things-go v0.3.6
 	github.com/meinside/telegram-bot-go v0.11.17
 	github.com/meinside/version-go v0.0.3
