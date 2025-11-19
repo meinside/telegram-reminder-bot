@@ -185,65 +185,73 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 
 	// generate text
 	var numTokensInput, numTokensOutput int32
-	if generated, err := gtc.Generate(
-		ctx,
-		[]gt.Prompt{
-			gt.PromptFromText(text),
-		},
-		opts,
+	if contents, err := gtc.PromptsToContents(ctx, []gt.Prompt{
+		gt.PromptFromText(text),
+	},
+		nil,
 	); err == nil {
-		logDebug(conf, "[verbose] generated: %s", prettify(generated))
+		if generated, err := gtc.Generate(
+			ctx,
+			contents,
+			opts,
+		); err == nil {
+			logDebug(conf, "[verbose] generated: %s", prettify(generated))
 
-		// token counts
-		if generated.UsageMetadata != nil {
-			if generated.UsageMetadata.PromptTokenCount != 0 {
-				numTokensInput = generated.UsageMetadata.PromptTokenCount
-			}
-			if generated.UsageMetadata.CandidatesTokenCount != 0 {
-				numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
-			}
-		}
-
-		if len(generated.Candidates) <= 0 {
-			logError(db, "there was no returned candidate")
-		} else {
-			for _, candidate := range generated.Candidates {
-				content := candidate.Content
-
-				if len(content.Parts) > 0 {
-					for _, part := range content.Parts {
-						if part.FunctionCall != nil { // if it is a function call,
-							if handled, err := handleFnCall(conf, *part.FunctionCall); err == nil {
-								// append result
-								result = append(result, handled...)
-							} else {
-								errs = append(errs, err)
-
-								logError(db, "failed to handle function call: %s", err)
-							}
-							break
-						}
-					}
-				} else {
-					errs = append(errs, fmt.Errorf("no part in content"))
-
-					logError(db, "there was no part in the returned content")
+			// token counts
+			if generated.UsageMetadata != nil {
+				if generated.UsageMetadata.PromptTokenCount != 0 {
+					numTokensInput = generated.UsageMetadata.PromptTokenCount
+				}
+				if generated.UsageMetadata.CandidatesTokenCount != 0 {
+					numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
 				}
 			}
 
-			if len(result) <= 0 {
-				errs = append(errs, fmt.Errorf("no function call in parts"))
+			if len(generated.Candidates) <= 0 {
+				logError(db, "there was no returned candidate")
+			} else {
+				for _, candidate := range generated.Candidates {
+					content := candidate.Content
 
-				logError(db, "there was no usable function call in the returned parts")
+					if len(content.Parts) > 0 {
+						for _, part := range content.Parts {
+							if part.FunctionCall != nil { // if it is a function call,
+								if handled, err := handleFnCall(conf, *part.FunctionCall); err == nil {
+									// append result
+									result = append(result, handled...)
+								} else {
+									errs = append(errs, err)
+
+									logError(db, "failed to handle function call: %s", err)
+								}
+								break
+							}
+						}
+					} else {
+						errs = append(errs, fmt.Errorf("no part in content"))
+
+						logError(db, "there was no part in the returned content")
+					}
+				}
+
+				if len(result) <= 0 {
+					errs = append(errs, fmt.Errorf("no function call in parts"))
+
+					logError(db, "there was no usable function call in the returned parts")
+				}
 			}
+		} else {
+			errs = append(errs, fmt.Errorf("failed to generate text: %s", errorString(err)))
+
+			// log failure
+			savePromptAndResult(db, chatID, userID, username, text, int(numTokensInput), int(numTokensOutput), false)
+
+			logError(db, "failed to generate text: %s", errorString(err))
 		}
 	} else {
-		errs = append(errs, fmt.Errorf("failed to generate text: %s", errorString(err)))
+		errs = append(errs, fmt.Errorf("failed to convert prompts/files to contents: %s", errorString(err)))
 
-		// log failure
-		savePromptAndResult(db, chatID, userID, username, text, int(numTokensInput), int(numTokensOutput), false)
-
-		logError(db, "failed to generate text: %s", errorString(err))
+		logError(db, "failed to convert prompts/files to contents: %s", errorString(err))
 	}
 
 	// log success
