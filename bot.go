@@ -17,15 +17,17 @@ import (
 )
 
 const (
-	intervalSeconds = 1
+	intervalSeconds                = 1
+	requestTimeoutSeconds          = 30
+	ignorableRequestTimeoutSeconds = 3
 
-	cmdStart         = "/start" // (internal)
-	cmdStats         = "/stats"
-	cmdHelp          = "/help"
-	cmdCancel        = "/cancel"
-	cmdLoad          = "/load" // (internal)
-	cmdListReminders = "/list"
-	cmdPrivacy       = "/privacy"
+	cmdStart         = `/start` // (internal)
+	cmdStats         = `/stats`
+	cmdHelp          = `/help`
+	cmdCancel        = `/cancel`
+	cmdLoad          = `/load` // (internal)
+	cmdListReminders = `/list`
+	cmdPrivacy       = `/privacy`
 
 	msgStart                 = `This bot will reserve your messages and notify you at desired times, with ChatGPT API :-)`
 	msgCmdNotSupported       = `Not a supported bot command: %s`
@@ -74,7 +76,7 @@ const (
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	defaultGenerativeModel         = "gemini-2.0-flash"
+	defaultGenerativeModel         = "gemini-2.5-flash"
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
@@ -105,7 +107,7 @@ func runBot(conf config) {
 	if err != nil {
 		logErrorAndDie(nil, "error initializing gemini-things client: %s", err)
 	}
-	defer gtc.Close()
+	defer func() { _ = gtc.Close() }()
 	gtc.SetSystemInstructionFunc(func() string {
 		return fmt.Sprintf(systemInstruction, datetimeToStr(time.Now()))
 	})
@@ -119,13 +121,21 @@ func runBot(conf config) {
 		logErrorAndDie(nil, "failed to open database: %s", err)
 	}
 
-	_ = bot.DeleteWebhook(false) // delete webhook before polling updates
-	if b := bot.GetMe(); b.Ok {
+	// delete webhook before polling updates
+	ctxDeleteWebhook, cancelDeleteWebhook := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+	defer cancelDeleteWebhook()
+	_ = bot.DeleteWebhook(ctxDeleteWebhook, false)
+
+	// get bot info
+	ctxGetMe, cancelGetMe := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+	defer cancelGetMe()
+	if b := bot.GetMe(ctxGetMe); b.Ok {
 		logInfo("launching bot: %s", userName(b.Result))
 
 		// monitor queue
 		logInfo("starting monitoring queue...")
 		go monitorQueue(
+			ctx,
 			time.NewTicker(time.Duration(conf.MonitorIntervalSeconds)*time.Second),
 			bot,
 			conf,
@@ -149,17 +159,17 @@ func runBot(conf config) {
 				return
 			}
 
-			handleCallbackQuery(b, db, callbackQuery)
+			handleCallbackQuery(ctx, b, db, callbackQuery)
 		})
 
 		// set command handlers
-		bot.AddCommandHandler(cmdStart, startCommandHandler(conf, db))
-		bot.AddCommandHandler(cmdListReminders, listRemindersCommandHandler(conf, db))
-		bot.AddCommandHandler(cmdStats, statsCommandHandler(conf, db))
-		bot.AddCommandHandler(cmdHelp, helpCommandHandler(conf, db))
-		bot.AddCommandHandler(cmdCancel, cancelCommandHandler(conf, db))
-		bot.AddCommandHandler(cmdPrivacy, privacyCommandHandler(conf, db))
-		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(conf, db))
+		bot.AddCommandHandler(cmdStart, startCommandHandler(ctx, conf, db))
+		bot.AddCommandHandler(cmdListReminders, listRemindersCommandHandler(ctx, conf, db))
+		bot.AddCommandHandler(cmdStats, statsCommandHandler(ctx, conf, db))
+		bot.AddCommandHandler(cmdHelp, helpCommandHandler(ctx, conf, db))
+		bot.AddCommandHandler(cmdCancel, cancelCommandHandler(ctx, conf, db))
+		bot.AddCommandHandler(cmdPrivacy, privacyCommandHandler(ctx, conf, db))
+		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(ctx, conf, db))
 
 		// poll updates
 		bot.StartPollingUpdates(0, intervalSeconds, func(b *tg.Bot, update tg.Update, err error) {
@@ -171,7 +181,7 @@ func runBot(conf config) {
 
 				// type not supported
 				if message := messageFromUpdate(update); message != nil {
-					send(b, conf, db, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
+					send(ctx, b, conf, db, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
 				}
 			} else {
 				logError(db, "failed to fetch updates: %s", err)
@@ -197,14 +207,25 @@ func isAllowed(conf config, update tg.Update) bool {
 }
 
 // poll queue items periodically
-func monitorQueue(monitor *time.Ticker, client *tg.Bot, conf config, db *Database) {
+func monitorQueue(
+	ctx context.Context,
+	monitor *time.Ticker,
+	client *tg.Bot,
+	conf config,
+	db *Database,
+) {
 	for range monitor.C {
-		processQueue(client, conf, db)
+		processQueue(ctx, client, conf, db)
 	}
 }
 
 // process queue item
-func processQueue(client *tg.Bot, conf config, db *Database) {
+func processQueue(
+	ctx context.Context,
+	client *tg.Bot,
+	conf config,
+	db *Database,
+) {
 	if queue, err := db.DeliverableQueueItems(conf.MaxNumTries); err == nil {
 		logDebug(conf, "checking queue: %d items...", len(queue))
 
@@ -213,7 +234,10 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 				message := q.Message
 
 				// send it
+				ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+				defer cancelSend()
 				sent := client.SendMessage(
+					ctxSend,
 					q.ChatID,
 					message,
 					tg.OptionsSendMessage{}.
@@ -241,7 +265,15 @@ func processQueue(client *tg.Bot, conf config, db *Database) {
 }
 
 // handle allowed message update from telegram bot api
-func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt.Client, update tg.Update, message tg.Message) {
+func handleMessage(
+	ctx context.Context,
+	bot *tg.Bot,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	update tg.Update,
+	message tg.Message,
+) {
 	var msg string
 
 	chatID := message.Chat.ID
@@ -250,7 +282,14 @@ func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, 
 		SetReplyMarkup(defaultReplyMarkup())
 
 	// 'is typing...'
-	bot.SendChatAction(chatID, tg.ChatActionTyping, tg.OptionsSendChatAction{})
+	ctxAction, cancelAction := context.WithTimeout(ctx, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelAction()
+	_ = bot.SendChatAction(
+		ctxAction,
+		chatID,
+		tg.ChatActionTyping,
+		tg.OptionsSendChatAction{},
+	)
 
 	if message := messageFromUpdate(update); message != nil {
 		options.SetReplyParameters(tg.NewReplyParameters(message.MessageID))
@@ -313,13 +352,25 @@ func handleMessage(ctx context.Context, bot *tg.Bot, conf config, db *Database, 
 	}
 
 	// send message
-	if sent := bot.SendMessage(chatID, msg, options); !sent.Ok {
+	ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+	defer cancelSend()
+	if sent := bot.SendMessage(
+		ctxSend,
+		chatID,
+		msg,
+		options,
+	); !sent.Ok {
 		logError(db, "failed to send message: %s", *sent.Description)
 	}
 }
 
 // handle allowed callback query from telegram bot api
-func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
+func handleCallbackQuery(
+	ctx context.Context,
+	b *tg.Bot,
+	db *Database,
+	query tg.CallbackQuery,
+) {
 	data := *query.Data
 
 	msg := msgError
@@ -389,15 +440,20 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 	}
 
 	// answer callback query
+	ctxAnswer, cancelAnswer := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+	defer cancelAnswer()
 	if apiResult := b.AnswerCallbackQuery(
+		ctxAnswer,
 		query.ID,
 		tg.OptionsAnswerCallbackQuery{}.
 			SetText(msg),
 	); apiResult.Ok {
 		// edit message and remove inline keyboards
+		ctxEdit, cancelEdit := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+		defer cancelEdit()
 		options := tg.OptionsEditMessageText{}.
 			SetIDs(query.Message.Chat.ID, query.Message.MessageID)
-		if apiResult := b.EditMessageText(msg, options); !apiResult.Ok {
+		if apiResult := b.EditMessageText(ctxEdit, msg, options); !apiResult.Ok {
 			logError(db, "failed to edit message text: %s", *apiResult.Description)
 		}
 	} else {
@@ -406,8 +462,18 @@ func handleCallbackQuery(b *tg.Bot, db *Database, query tg.CallbackQuery) {
 }
 
 // send given message to the chat
-func send(bot *tg.Bot, conf config, db *Database, message string, chatID int64, messageID *int64) {
-	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
+func send(
+	ctx context.Context,
+	bot *tg.Bot,
+	conf config,
+	db *Database,
+	message string,
+	chatID int64,
+	messageID *int64,
+) {
+	ctxAction, cancelAction := context.WithTimeout(ctx, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelAction()
+	_ = bot.SendChatAction(ctxAction, chatID, tg.ChatActionTyping, nil)
 
 	logDebug(conf, "[verbose] sending message to chat(%d): '%s'", chatID, message)
 
@@ -417,13 +483,25 @@ func send(bot *tg.Bot, conf config, db *Database, message string, chatID int64, 
 	if messageID != nil {
 		options.SetReplyParameters(tg.NewReplyParameters(*messageID))
 	}
-	if res := bot.SendMessage(chatID, message, options); !res.Ok {
+
+	ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+	defer cancelSend()
+	if res := bot.SendMessage(
+		ctxSend,
+		chatID,
+		message,
+		options,
+	); !res.Ok {
 		logError(db, "failed to send message: %s", *res.Description)
 	}
 }
 
 // return a /start command handler
-func startCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
+func startCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, _ string) {
 		if !isAllowed(conf, update) {
 			log.Printf("start command not allowed: %s", userNameFromUpdate(update))
@@ -433,13 +511,17 @@ func startCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Up
 		if message := messageFromUpdate(update); message != nil {
 			chatID := message.Chat.ID
 
-			send(b, conf, db, msgStart, chatID, nil)
+			send(ctx, b, conf, db, msgStart, chatID, nil)
 		}
 	}
 }
 
 // return a /list command handler
-func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
+func listRemindersCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, args string) {
 		if !isAllowed(conf, update) {
 			log.Printf("start command not allowed: %s", userNameFromUpdate(update))
@@ -470,13 +552,13 @@ func listRemindersCommandHandler(conf config, db *Database) func(b *tg.Bot, upda
 			if len(msg) <= 0 {
 				msg = msgError
 			}
-			send(b, conf, db, msg, chatID, nil)
+			send(ctx, b, conf, db, msg, chatID, nil)
 		}
 	}
 }
 
 // return a /cancel command handler
-func cancelCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
+func cancelCommandHandler(ctx context.Context, conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, args string) {
 		if !isAllowed(conf, update) {
 			log.Printf("start command not allowed: %s", userNameFromUpdate(update))
@@ -522,7 +604,10 @@ func cancelCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 			if len(msg) <= 0 {
 				msg = msgError
 			}
-			if sent := b.SendMessage(chatID, msg, options); !sent.Ok {
+
+			ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+			defer cancelSend()
+			if sent := b.SendMessage(ctxSend, chatID, msg, options); !sent.Ok {
 				logError(db, "failed to send message: %s", *sent.Description)
 			}
 		}
@@ -530,18 +615,26 @@ func cancelCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 }
 
 // return a /privacy command handler
-func privacyCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
+func privacyCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, args string) {
 		if message := messageFromUpdate(update); message != nil {
 			chatID := message.Chat.ID
 
-			send(b, conf, db, msgPrivacy, chatID, nil)
+			send(ctx, b, conf, db, msgPrivacy, chatID, nil)
 		}
 	}
 }
 
 // return a /stats command handler
-func statsCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
+func statsCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, args string) {
 		if !isAllowed(conf, update) {
 			log.Printf("stats command not allowed: %s", userNameFromUpdate(update))
@@ -559,13 +652,17 @@ func statsCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Up
 				msg = db.Stats()
 			}
 
-			send(b, conf, db, msg, chatID, &messageID)
+			send(ctx, b, conf, db, msg, chatID, &messageID)
 		}
 	}
 }
 
 // return a /help command handler
-func helpCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, args string) {
+func helpCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, _ string) {
 		if !isAllowed(conf, update) {
 			log.Printf("help command not allowed: %s", userNameFromUpdate(update))
@@ -576,13 +673,17 @@ func helpCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Upd
 			chatID := message.Chat.ID
 			messageID := message.MessageID
 
-			send(b, conf, db, helpMessage(conf), chatID, &messageID)
+			send(ctx, b, conf, db, helpMessage(conf), chatID, &messageID)
 		}
 	}
 }
 
 // return a 'no such command' handler
-func noSuchCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.Update, cmd, args string) {
+func noSuchCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+) func(b *tg.Bot, update tg.Update, cmd, args string) {
 	return func(b *tg.Bot, update tg.Update, cmd, args string) {
 		if !isAllowed(conf, update) {
 			log.Printf("command not allowed: %s", userNameFromUpdate(update))
@@ -593,7 +694,7 @@ func noSuchCommandHandler(conf config, db *Database) func(b *tg.Bot, update tg.U
 			chatID := message.Chat.ID
 			messageID := message.MessageID
 
-			send(b, conf, db, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
+			send(ctx, b, conf, db, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 		}
 	}
 }
