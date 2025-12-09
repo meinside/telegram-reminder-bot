@@ -99,7 +99,10 @@ func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 }
 
 // handle function call
-func handleFnCall(conf config, fn genai.FunctionCall) (result []parsedItem, err error) {
+func handleFnCall(
+	conf config,
+	fn genai.FunctionCall,
+) (result []parsedItem, err error) {
 	logDebug(conf, "[verbose] handling function call: %s", prettify(fn))
 
 	result = []parsedItem{}
@@ -155,7 +158,14 @@ func prettify(v any) string {
 }
 
 // parse given string, generate items from the parsed ones, and return them
-func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, message tg.Message, text string) (result []parsedItem, errs []error) {
+func parse(
+	ctx context.Context,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	message tg.Message,
+	text string,
+) (result []parsedItem, errs []error) {
 	result = []parsedItem{}
 	errs = []error{}
 
@@ -183,15 +193,24 @@ func parse(ctx context.Context, conf config, db *Database, gtc *gt.Client, messa
 		},
 	}
 
-	// generate text
+	ctxContents, cancelContents := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+	defer cancelContents()
+
+	// convert prompt text to content for generation
 	var numTokensInput, numTokensOutput int32
-	if contents, err := gtc.PromptsToContents(ctx, []gt.Prompt{
-		gt.PromptFromText(text),
-	},
+	if contents, err := gtc.PromptsToContents(
+		ctxContents,
+		[]gt.Prompt{
+			gt.PromptFromText(text),
+		},
 		nil,
 	); err == nil {
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+		defer cancelGenerate()
+
+		// generate text
 		if generated, err := gtc.Generate(
-			ctx,
+			ctxGenerate,
 			contents,
 			opts,
 		); err == nil {
