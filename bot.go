@@ -76,7 +76,8 @@ const (
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	defaultGenerativeModel         = "gemini-2.5-flash"
+	// defaultGenerativeModel         = `gemini-2.5-flash`
+	defaultGenerativeModel = `gemini-3-flash-preview`
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
