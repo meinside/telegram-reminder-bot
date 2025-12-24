@@ -174,7 +174,7 @@ func parse(
 	username := userName(message.From)
 
 	// options for generation
-	opts := &gt.GenerationOptions{
+	opts := &genai.GenerateContentConfig{
 		// set function declarations
 		Tools: []*genai.Tool{
 			{
