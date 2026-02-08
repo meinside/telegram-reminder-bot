@@ -60,15 +60,23 @@ const (
 	msgNoClue                 = `There was no clue for the desired datetime in your message.`
 	msgPrivacy                = "Privacy Policy:\n\n" + githubPageURL + `/raw/master/PRIVACY.md`
 
-	systemInstruction = `You are a kind and considerate chat bot which is built for understanding user's prompt, extracting desired datetime and prompt from it, and sending the prompt at the exact datetime. Current datetime is '%s'.`
+	systemInstruction = `You are a kind and considerate chat bot which is built for understanding the user's prompt, extracting desired datetime and prompt from it, and sending a reminder message at the exact datetime.
+
+	Current datetime is '%s'.
+	`
 
 	// function call
 	fnNameInferDatetime              = `infer_datetime`
 	fnDescriptionInferDatetime       = `This function infers a datetime and a message from the original prompt text.`
 	fnArgNameInferredDatetime        = `inferred_datetime`
-	fnArgDescriptionInferredDatetime = `Inferred datetime which is formatted as 'yyyy.mm.dd hh:MM TZ'(eg. 2024.12.25 15:00 KST). If the time cannot be inferred, fallback to %02d:00.`
-	fnArgNameMessageToSend           = `message_to_send`
-	fnArgDescriptionMessageToSend    = `Inferred message to be sent at 'inferred_datetime'. If it cannot be inferred, use the original prompt.`
+	fnArgDescriptionInferredDatetime = `Inferred datetime which is formatted as 'yyyy.mm.dd hh:MM TZ'(eg. 2024.12.25 15:00 KST).
+If the time cannot be inferred, fallback to %02d:00.
+`
+	fnArgNameMessageToSend        = `message_to_send`
+	fnArgDescriptionMessageToSend = `Inferred message to be sent at 'inferred_datetime'.
+If it cannot be inferred, use the original prompt.
+If possible, make the message in a suggestive tone.
+`
 
 	datetimeFormat = `2006.01.02 15:04 MST` // yyyy.mm.dd hh:MM TZ
 
