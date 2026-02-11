@@ -133,12 +133,12 @@ func runBot(conf config) {
 	// delete webhook before polling updates
 	ctxDeleteWebhook, cancelDeleteWebhook := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 	defer cancelDeleteWebhook()
-	_ = bot.DeleteWebhook(ctxDeleteWebhook, false)
+	_, _ = bot.DeleteWebhook(ctxDeleteWebhook, false)
 
 	// get bot info
 	ctxGetMe, cancelGetMe := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 	defer cancelGetMe()
-	if b := bot.GetMe(ctxGetMe); b.Ok {
+	if b, _ := bot.GetMe(ctxGetMe); b.OK {
 		logInfo("launching bot: %s", userName(b.Result))
 
 		// monitor queue
@@ -245,7 +245,7 @@ func processQueue(
 				// send it
 				ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 				defer cancelSend()
-				sent := client.SendMessage(
+				sent, _ := client.SendMessage(
 					ctxSend,
 					q.ChatID,
 					message,
@@ -253,7 +253,7 @@ func processQueue(
 						SetReplyMarkup(defaultReplyMarkup()).
 						SetReplyParameters(tg.NewReplyParameters(q.MessageID)))
 
-				if sent.Ok {
+				if sent.OK {
 					// mark as delivered
 					if _, err := db.MarkQueueItemAsDelivered(q.ChatID, q.ID); err != nil {
 						logError(db, "failed to mark chat id: %d, queue id: %d (%s)", q.ChatID, q.ID, err)
@@ -293,7 +293,7 @@ func handleMessage(
 	// 'is typing...'
 	ctxAction, cancelAction := context.WithTimeout(ctx, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelAction()
-	_ = bot.SendChatAction(
+	_, _ = bot.SendChatAction(
 		ctxAction,
 		chatID,
 		tg.ChatActionTyping,
@@ -363,12 +363,12 @@ func handleMessage(
 	// send message
 	ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 	defer cancelSend()
-	if sent := bot.SendMessage(
+	if sent, _ := bot.SendMessage(
 		ctxSend,
 		chatID,
 		msg,
 		options,
-	); !sent.Ok {
+	); !sent.OK {
 		logError(db, "failed to send message: %s", *sent.Description)
 	}
 }
@@ -451,18 +451,18 @@ func handleCallbackQuery(
 	// answer callback query
 	ctxAnswer, cancelAnswer := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 	defer cancelAnswer()
-	if apiResult := b.AnswerCallbackQuery(
+	if apiResult, _ := b.AnswerCallbackQuery(
 		ctxAnswer,
 		query.ID,
 		tg.OptionsAnswerCallbackQuery{}.
 			SetText(msg),
-	); apiResult.Ok {
+	); apiResult.OK {
 		// edit message and remove inline keyboards
 		ctxEdit, cancelEdit := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 		defer cancelEdit()
 		options := tg.OptionsEditMessageText{}.
 			SetIDs(query.Message.Chat.ID, query.Message.MessageID)
-		if apiResult := b.EditMessageText(ctxEdit, msg, options); !apiResult.Ok {
+		if apiResult, _ := b.EditMessageText(ctxEdit, msg, options); !apiResult.OK {
 			logError(db, "failed to edit message text: %s", *apiResult.Description)
 		}
 	} else {
@@ -482,7 +482,7 @@ func send(
 ) {
 	ctxAction, cancelAction := context.WithTimeout(ctx, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelAction()
-	_ = bot.SendChatAction(ctxAction, chatID, tg.ChatActionTyping, nil)
+	_, _ = bot.SendChatAction(ctxAction, chatID, tg.ChatActionTyping, nil)
 
 	logDebug(conf, "[verbose] sending message to chat(%d): '%s'", chatID, message)
 
@@ -495,12 +495,12 @@ func send(
 
 	ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 	defer cancelSend()
-	if res := bot.SendMessage(
+	if res, _ := bot.SendMessage(
 		ctxSend,
 		chatID,
 		message,
 		options,
-	); !res.Ok {
+	); !res.OK {
 		logError(db, "failed to send message: %s", *res.Description)
 	}
 }
@@ -616,7 +616,7 @@ func cancelCommandHandler(ctx context.Context, conf config, db *Database) func(b
 
 			ctxSend, cancelSend := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
 			defer cancelSend()
-			if sent := b.SendMessage(ctxSend, chatID, msg, options); !sent.Ok {
+			if sent, _ := b.SendMessage(ctxSend, chatID, msg, options); !sent.OK {
 				logError(db, "failed to send message: %s", *sent.Description)
 			}
 		}
