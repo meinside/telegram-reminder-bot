@@ -125,8 +125,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mattn/go-sqlite3 v1.14.34 h1:3NtcvcUnFBPsuRcno8pUtupspG/GM+9nZ88zgJcp6Zk=
 github.com/mattn/go-sqlite3 v1.14.34/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/meinside/gemini-things-go v0.5.13 h1:OBWUvUxevEwEBe2atW+ZsgzypxI+R+0/xE7phqePLM4=
-github.com/meinside/gemini-things-go v0.5.13/go.mod h1:oqQYp02r1BVTGiC1Rtcqc/Bbg4jkCd0+c/V1EQr9EMs=
+github.com/meinside/gemini-things-go v0.5.14 h1:x7sjrn/2Jqg2jIgJeaTeAXDnONW8qBG5F+n0vmfOQ1s=
+github.com/meinside/gemini-things-go v0.5.14/go.mod h1:mygRqyNYHTkkgmqXynjq/tfRsbLyyoVgjfmTXZdyacs=
 github.com/meinside/telegram-bot-go v0.13.0 h1:cboA46CTwsc9/QyDqSi1t1VjaGrmvhAwbuXCna6t4TE=
 github.com/meinside/telegram-bot-go v0.13.0/go.mod h1:oLIiqj043Hkp5zEApHuhPelxAJiD70jKlFSvO2cI9Eo=
 github.com/meinside/version-go v0.0.3 h1:GXSwi6sTmgpnSR09jAAqDGWeX2Nq52fe5xpitgAhQfM=
