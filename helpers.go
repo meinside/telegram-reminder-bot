@@ -80,19 +80,19 @@ func fnDeclarations(conf config) []*genai.FunctionDeclaration {
 					fnArgNameInferredDatetime: {
 						Type:        genai.TypeString,
 						Description: fmt.Sprintf(fnArgDescriptionInferredDatetime, conf.DefaultHour),
-						Nullable:    ptr(false),
+						Nullable:    new(false),
 					},
 					fnArgNameMessageToSend: {
 						Type:        genai.TypeString,
 						Description: fnArgDescriptionMessageToSend,
-						Nullable:    ptr(false),
+						Nullable:    new(false),
 					},
 				},
 				Required: []string{
 					fnArgNameInferredDatetime,
 					fnArgNameMessageToSend,
 				},
-				Nullable: ptr(false),
+				Nullable: new(false),
 			},
 		},
 	}
@@ -437,11 +437,6 @@ func errorString(err error) (error string) {
 	} else {
 		return err.Error()
 	}
-}
-
-// return a pointer to given value
-func ptr[T any](t T) *T {
-	return &t
 }
 
 // shorten returns a string trimmed to fit in given `maxLength`
