@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/infisical/go-sdk v0.6.8
 	github.com/meinside/gemini-things-go v0.5.23
-	github.com/meinside/telegram-bot-go v0.13.1
+	github.com/meinside/telegram-bot-go v0.13.2
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd
 	golang.org/x/text v0.34.0
@@ -93,6 +93,6 @@ require (
 	google.golang.org/genproto v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
-	google.golang.org/grpc v1.79.1 // indirect
+	google.golang.org/grpc v1.79.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
