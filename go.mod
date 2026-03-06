@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/infisical/go-sdk v0.6.8
-	github.com/meinside/gemini-things-go v0.5.22
+	github.com/meinside/gemini-things-go v0.5.23
 	github.com/meinside/telegram-bot-go v0.13.1
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd
@@ -56,7 +56,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.13 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
