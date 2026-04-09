@@ -19,6 +19,7 @@ import (
 const (
 	intervalSeconds                = 1
 	requestTimeoutSeconds          = 30
+	generationTimeoutSeconds       = 90
 	ignorableRequestTimeoutSeconds = 3
 
 	cmdStart         = `/start` // (internal)
