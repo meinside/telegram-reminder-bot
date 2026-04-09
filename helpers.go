@@ -205,7 +205,7 @@ func parse(
 		},
 		nil,
 	); err == nil {
-		ctxGenerate, cancelGenerate := context.WithTimeout(ctx, requestTimeoutSeconds*time.Second)
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctx, generationTimeoutSeconds*time.Second)
 		defer cancelGenerate()
 
 		// generate text
