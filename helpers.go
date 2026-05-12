@@ -392,9 +392,27 @@ func logErrorAndDie(db *Database, format string, a ...any) {
 func defaultReplyMarkup() tg.ReplyKeyboardMarkup {
 	return tg.NewReplyKeyboardMarkup( // show keyboards
 		[][]tg.KeyboardButton{
-			tg.NewKeyboardButtons(cmdListReminders, cmdCancel, cmdStats),
-			tg.NewKeyboardButtons(cmdPrivacy, cmdHelp),
-		}).
+			// row 1
+			{
+				// column 1
+				tg.NewKeyboardButton(cmdListReminders).SetStyle(tg.KeyboardStylePrimary),
+
+				// column 2
+				tg.NewKeyboardButton(cmdCancel).SetStyle(tg.KeyboardStyleDanger),
+
+				// column 3
+				tg.NewKeyboardButton(cmdStats),
+			},
+			// row 2
+			{
+				// column 1
+				tg.NewKeyboardButton(cmdPrivacy),
+
+				// column 2
+				tg.NewKeyboardButton(cmdHelp),
+			},
+		},
+	).
 		SetResizeKeyboard(true)
 }
 
@@ -418,7 +436,8 @@ func datetimeButtonsForCallbackQuery(items []parsedItem, chatID int64, messageID
 	// add cancel button
 	buttons = append(buttons, []tg.InlineKeyboardButton{
 		tg.NewInlineKeyboardButton(msgCancel).
-			SetCallbackData(cmdCancel),
+			SetCallbackData(cmdCancel).
+			SetStyle(tg.KeyboardStyleDanger),
 	})
 
 	return buttons

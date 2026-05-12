@@ -252,7 +252,8 @@ func processQueue(
 					message,
 					tg.OptionsSendMessage{}.
 						SetReplyMarkup(defaultReplyMarkup()).
-						SetReplyParameters(tg.NewReplyParameters(q.MessageID)))
+						SetReplyParameters(tg.NewReplyParameters(q.MessageID)),
+				)
 
 				if sent.OK {
 					// mark as delivered
@@ -314,19 +315,22 @@ func handleMessage(
 					when := parsed[0].When
 
 					if _, err := db.Enqueue(chatID, message.MessageID, what, when); err == nil {
-						msg = fmt.Sprintf(msgResponseFormat,
+						msg = fmt.Sprintf(
+							msgResponseFormat,
 							what, // NOTE: not shorten it
 							datetimeToStr(when),
 						)
 					} else {
-						msg = fmt.Sprintf(msgSaveFailedFormat,
+						msg = fmt.Sprintf(
+							msgSaveFailedFormat,
 							shorten(what, 100), // NOTE: shorten it
 							err,
 						)
 					}
 				} else if len(parsed) > 0 {
 					if _, err := db.SaveTemporaryMessage(chatID, message.MessageID, parsed[0].Message); err == nil {
-						msg = fmt.Sprintf(msgSelectWhat,
+						msg = fmt.Sprintf(
+							msgSelectWhat,
 							parsed[0].Message, // NOTE: not shorten it
 						)
 
@@ -341,7 +345,8 @@ func handleMessage(
 					msg = msgNoClue
 				}
 			} else {
-				msg = fmt.Sprintf(msgParseFailedFormat,
+				msg = fmt.Sprintf(
+					msgParseFailedFormat,
 					errors.Join(errs...),
 				)
 			}
@@ -393,7 +398,8 @@ func handleCallbackQuery(
 			if queueID, err := strconv.Atoi(cancelParam); err == nil {
 				if item, err := db.GetQueueItem(query.Message.Chat.ID, int64(queueID)); err == nil {
 					if _, err := db.DeleteQueueItem(query.Message.Chat.ID, int64(queueID)); err == nil {
-						msg = fmt.Sprintf(msgReminderCanceledFormat,
+						msg = fmt.Sprintf(
+							msgReminderCanceledFormat,
 							item.Message, // NOTE: not shorten it
 						)
 					} else {
@@ -415,7 +421,8 @@ func handleCallbackQuery(
 					if saved, err := db.LoadTemporaryMessage(chatID, messageID); err == nil {
 						if when, err := time.ParseInLocation(datetimeFormat, params[2], _location); err == nil {
 							if _, err := db.Enqueue(chatID, messageID, saved.Message, when); err == nil {
-								msg = fmt.Sprintf(msgResponseFormat,
+								msg = fmt.Sprintf(
+									msgResponseFormat,
 									shorten(saved.Message, 160), // NOTE: shorten it
 									datetimeToStr(when),
 								)
@@ -425,7 +432,8 @@ func handleCallbackQuery(
 									logError(db, "failed to delete temporary message: %s", err)
 								}
 							} else {
-								msg = fmt.Sprintf(msgSaveFailedFormat,
+								msg = fmt.Sprintf(
+									msgSaveFailedFormat,
 									shorten(saved.Message, 160), // NOTE: shorten it
 									err,
 								)
@@ -546,7 +554,8 @@ func listRemindersCommandHandler(
 				if len(reminders) > 0 {
 					format := fmt.Sprintf("%s\n", msgListItemFormat)
 					for _, r := range reminders {
-						msg += fmt.Sprintf(format,
+						msg += fmt.Sprintf(
+							format,
 							datetimeToStr(r.FireOn),
 							shorten(r.Message, 100), // NOTE: shorten it
 						)
@@ -586,7 +595,8 @@ func cancelCommandHandler(ctx context.Context, conf config, db *Database) func(b
 					// inline keyboards
 					keys := make(map[string]string)
 					for _, r := range reminders {
-						keys[fmt.Sprintf(msgListItemFormat,
+						keys[fmt.Sprintf(
+							msgListItemFormat,
 							datetimeToStr(r.FireOn),
 							shorten(r.Message, 100), // NOTE: shorten it
 						)] = fmt.Sprintf("%s %d", cmdCancel, r.ID)
@@ -596,7 +606,8 @@ func cancelCommandHandler(ctx context.Context, conf config, db *Database) func(b
 					// add a cancel button for canceling reminder
 					buttons = append(buttons, []tg.InlineKeyboardButton{
 						tg.NewInlineKeyboardButton(msgCancel).
-							SetCallbackData(cmdCancel),
+							SetCallbackData(cmdCancel).
+							SetStyle(tg.KeyboardStyleDanger),
 					})
 
 					// options
