@@ -85,8 +85,7 @@ If possible, make the message in a suggestive tone.
 	defaultMonitorIntervalSeconds  = 30
 	defaultTelegramIntervalSeconds = 60
 	defaultMaxNumTries             = 5
-	// defaultGenerativeModel         = `gemini-2.5-flash`
-	defaultGenerativeModel = `gemini-3-flash-preview`
+	defaultGenerativeModel         = `gemini-3.6-flash`
 
 	githubPageURL = `https://github.com/meinside/telegram-reminder-bot`
 )
